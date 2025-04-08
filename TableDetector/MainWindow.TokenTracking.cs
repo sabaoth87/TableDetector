@@ -13,7 +13,6 @@ using System.Text.Json;
 namespace TableDetector
 {
     // This file contains the token tracking methods for the MainWindow class
-
     public partial class MainWindow
     {
         /// <summary>
@@ -69,6 +68,182 @@ namespace TableDetector
         /// Calibrates token detection thresholds
         /// </summary>
         private void CalibrateTokens_Click(object sender, RoutedEventArgs e)
+        {
+            // Create a calibration dialog
+            var dialog = new Window
+            {
+                Title = "Token & Miniature Calibration",
+                Width = 450,
+                Height = 450,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+
+            // Create the calibration UI with scrolling
+            var scrollViewer = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var panel = new StackPanel { Margin = new Thickness(10) };
+            scrollViewer.Content = panel;
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Configure detection settings for both flat tokens and 3D miniatures.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 10)
+            });
+
+            // Token height range sliders
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Flat Token Settings:",
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 5, 0, 5)
+            });
+
+            panel.Children.Add(new TextBlock { Text = "Token Height Range (mm):" });
+
+            var minHeightSlider = new Slider
+            {
+                Minimum = 2,
+                Maximum = 20,
+                Value = MIN_TOKEN_HEIGHT,
+                TickFrequency = 2,
+                TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight,
+                IsSnapToTickEnabled = true,
+                Margin = new Thickness(0, 5, 0, 5)
+            };
+
+            var minHeightLabel = new TextBlock { Text = $"Min Height: {MIN_TOKEN_HEIGHT}mm" };
+            minHeightSlider.ValueChanged += (s, args) =>
+            {
+                MIN_TOKEN_HEIGHT = (int)args.NewValue;
+                minHeightLabel.Text = $"Min Height: {MIN_TOKEN_HEIGHT}mm";
+            };
+
+            panel.Children.Add(minHeightSlider);
+            panel.Children.Add(minHeightLabel);
+
+            // Add Miniature-specific settings
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Miniature Settings:",
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 15, 0, 5)
+            });
+
+            panel.Children.Add(new TextBlock { Text = "Miniature Max Height (mm):" });
+
+            var maxHeightSlider = new Slider
+            {
+                Minimum = 30,
+                Maximum = 150,
+                Value = MAX_TOKEN_HEIGHT,
+                TickFrequency = 10,
+                TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight,
+                IsSnapToTickEnabled = true,
+                Margin = new Thickness(0, 5, 0, 5)
+            };
+
+            var maxHeightLabel = new TextBlock { Text = $"Max Height: {MAX_TOKEN_HEIGHT}mm" };
+            maxHeightSlider.ValueChanged += (s, args) =>
+            {
+                MAX_TOKEN_HEIGHT = (int)args.NewValue;
+                maxHeightLabel.Text = $"Max Height: {MAX_TOKEN_HEIGHT}mm";
+            };
+
+            panel.Children.Add(maxHeightSlider);
+            panel.Children.Add(maxHeightLabel);
+
+            // Miniature detection sensitivity
+            panel.Children.Add(new TextBlock { Text = "Miniature Detection Sensitivity:" });
+
+            var miniatureThresholdSlider = new Slider
+            {
+                Minimum = 3,
+                Maximum = 20,
+                Value = Math.Max(3, tokenDetectionThreshold / 2), // Default: half of normal threshold
+                TickFrequency = 1,
+                TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight,
+                IsSnapToTickEnabled = true,
+                Margin = new Thickness(0, 5, 0, 5)
+            };
+
+            var miniatureThresholdLabel = new TextBlock
+            {
+                Text = $"Minimum Pixel Count: {Math.Max(3, tokenDetectionThreshold / 2)}"
+            };
+
+            miniatureThresholdSlider.ValueChanged += (s, args) =>
+            {
+                // Store this value in a new app setting
+                int miniatureDetectionThreshold = (int)args.NewValue;
+                miniatureThresholdLabel.Text = $"Minimum Pixel Count: {miniatureDetectionThreshold}";
+
+                // Use App.Current.Properties to store this setting or add a dedicated field
+                // For now we'll adjust the main threshold
+                tokenDetectionThreshold = Math.Max(miniatureDetectionThreshold * 2, 10);
+            };
+
+            panel.Children.Add(miniatureThresholdSlider);
+            panel.Children.Add(miniatureThresholdLabel);
+
+            // Add test button to run a detection cycle
+            var testButton = new Button
+            {
+                Content = "Test Current Settings",
+                Padding = new Thickness(10, 5, 10, 5),
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            testButton.Click += (s, args) =>
+            {
+                // Force a detection cycle
+                DetectTokens();
+                StatusText = $"Detected {detectedTokens.Count} objects with current settings";
+            };
+
+            panel.Children.Add(testButton);
+
+            // Add buttons
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 15, 0, 0)
+            };
+
+            var saveButton = new Button
+            {
+                Content = "Save & Close",
+                Padding = new Thickness(10, 5, 10, 5),
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+
+            saveButton.Click += (s, args) =>
+            {
+                // Save the calibration settings
+                SaveSettings();
+                dialog.Close();
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancel",
+                Padding = new Thickness(10, 5, 10, 5)
+            };
+
+            cancelButton.Click += (s, args) => dialog.Close();
+
+            buttonPanel.Children.Add(saveButton);
+            buttonPanel.Children.Add(cancelButton);
+            panel.Children.Add(buttonPanel);
+
+            dialog.Content = scrollViewer;
+            dialog.ShowDialog();
+
+            StatusText = "Token and miniature calibration updated";
+        }
+
+        private void CalibrateTokens_ClickOld(object sender, RoutedEventArgs e)
         {
             // Create a calibration dialog
             var dialog = new Window
@@ -202,6 +377,7 @@ namespace TableDetector
 
             StatusText = "Token calibration complete";
         }
+
 
         /// <summary>
         /// Clears all detected tokens
@@ -415,46 +591,95 @@ namespace TableDetector
             double scaleX = TokenOverlayCanvas.ActualWidth / depthWidth;
             double scaleY = TokenOverlayCanvas.ActualHeight / depthHeight;
 
+            // Debug the scaling calculation
+            Console.WriteLine($"Canvas Size: {TokenOverlayCanvas.ActualWidth}x{TokenOverlayCanvas.ActualHeight}, Depth Size: {depthWidth}x{depthHeight}");
+            Console.WriteLine($"Scale factors: {scaleX}x{scaleY}");
+
             // Add overlays for each token
             foreach (var token in detectedTokens)
             {
-                // Create an ellipse for the token
-                Ellipse tokenEllipse = new Ellipse
+                try
                 {
-                    Width = token.DiameterPixels * scaleX,
-                    Height = token.DiameterPixels * scaleY,
-                    Stroke = new SolidColorBrush(GetTokenTypeColor(token.Type)),
-                    StrokeThickness = 2
-                };
-
-                // Position the ellipse
-                Canvas.SetLeft(tokenEllipse, (token.Position.X - token.DiameterPixels / 2) * scaleX);
-                Canvas.SetTop(tokenEllipse, (token.Position.Y - token.DiameterPixels / 2) * scaleY);
-
-                // Add to canvas
-                TokenOverlayCanvas.Children.Add(tokenEllipse);
-
-                // Add label if enabled
-                if (showTokenLabels)
-                {
-                    // Create a label
-                    TextBlock label = new TextBlock
+                    // Create an ellipse for the token
+                    Ellipse tokenEllipse = new Ellipse
                     {
-                        Text = GetTokenLabel(token),
-                        Foreground = new SolidColorBrush(Colors.White),
-                        Background = new SolidColorBrush(Color.FromArgb(128, 0, 0, 0)),
-                        Padding = new Thickness(2),
-                        FontSize = 10
+                        Width = token.DiameterPixels * scaleX,
+                        Height = token.DiameterPixels * scaleY,
+                        Stroke = new SolidColorBrush(GetTokenTypeColor(token.Type)),
+                        StrokeThickness = 2
                     };
 
-                    // Position the label
-                    Canvas.SetLeft(label, token.Position.X * scaleX - label.ActualWidth / 2);
-                    Canvas.SetTop(label, (token.Position.Y - token.DiameterPixels / 2 - 20) * scaleY);
+                    // Position the ellipse
+                    double left = (token.Position.X - token.DiameterPixels / 2) * scaleX;
+                    double top = (token.Position.Y - token.DiameterPixels / 2) * scaleY;
+
+                    Canvas.SetLeft(tokenEllipse, left);
+                    Canvas.SetTop(tokenEllipse, top);
 
                     // Add to canvas
-                    TokenOverlayCanvas.Children.Add(label);
+                    TokenOverlayCanvas.Children.Add(tokenEllipse);
+
+                    // Add label if enabled
+                    if (showTokenLabels)
+                    {
+                        // Create a label with additional info
+                        string labelText = GetTokenLabel(token);
+                        TextBlock label = new TextBlock
+                        {
+                            Text = labelText,
+                            Foreground = new SolidColorBrush(Colors.White),
+                            Background = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0)),
+                            Padding = new Thickness(4),
+                            FontSize = 12,
+                            FontWeight = FontWeights.Bold
+                        };
+
+                        // Let the textblock measure itself with the content before positioning
+                        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+
+                        // Position the label
+                        double labelLeft = token.Position.X * scaleX - label.DesiredSize.Width / 2;
+                        double labelTop = (token.Position.Y - token.DiameterPixels / 2 - 25) * scaleY;
+
+                        Canvas.SetLeft(label, labelLeft);
+                        Canvas.SetTop(label, labelTop);
+
+                        // Add to canvas
+                        TokenOverlayCanvas.Children.Add(label);
+                    }
+
+                    // Add a center point for the token (helps with debugging)
+                    Ellipse centerPoint = new Ellipse
+                    {
+                        Width = 6,
+                        Height = 6,
+                        Fill = new SolidColorBrush(Colors.Yellow)
+                    };
+
+                    Canvas.SetLeft(centerPoint, token.Position.X * scaleX - 3);
+                    Canvas.SetTop(centerPoint, token.Position.Y * scaleY - 3);
+
+                    TokenOverlayCanvas.Children.Add(centerPoint);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error drawing token overlay: {ex.Message}");
                 }
             }
+
+            // Debug display
+            StatusText = $"Updated overlay for {detectedTokens.Count} tokens";
+        }
+
+        /// <summary>
+        /// Gets a label for the specified token
+        /// </summary>
+        private string GetTokenLabel(TTRPGToken token)
+        {
+            string typeLabel = token.Type != TokenType.Unknown ?
+                $"{token.Type}" : "Token";
+
+            return $"{typeLabel}: {token.HeightMm}mm × {token.DiameterPixels:F0}px";
         }
 
         /// <summary>
@@ -484,7 +709,7 @@ namespace TableDetector
         /// <summary>
         /// Gets a label for the specified token
         /// </summary>
-        private string GetTokenLabel(TTRPGToken token)
+        private string GetTokenLabelOld(TTRPGToken token)
         {
             string typeLabel = token.Type != TokenType.Unknown ?
                 $"{token.Type}" : "Token";

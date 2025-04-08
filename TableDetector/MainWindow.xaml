@@ -7,7 +7,9 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -48,7 +50,7 @@
         </Menu>
 
         <!-- Header -->
-        <Border Grid.Row="0" Background="#333333" Padding="10">
+        <Border Grid.Row="1" Background="#333333" Padding="10">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="Kinect TTRPG Token Tracker" Foreground="White" FontSize="18" VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding StatusText}" Foreground="White" Margin="20,0,0,0" VerticalAlignment="Center"/>
@@ -57,7 +59,7 @@
         </Border>
 
         <!-- Main Content -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
@@ -77,15 +79,19 @@
             <!-- Depth Feed -->
             <Border Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Margin="5">
                 <Grid>
-                    <Image x:Name="DepthImage" Stretch="Uniform"/>
+                    <Image x:Name="DepthImage" Stretch="Uniform"
+                           MouseDown="Image_MouseDown" 
+                           MouseMove="Image_MouseMove" 
+                           MouseUp="Image_MouseUp"/>    
                     <TextBlock Text="Depth Feed" Foreground="White" Background="#80000000" 
                                Padding="5" VerticalAlignment="Top" HorizontalAlignment="Left"/>
+                    <Canvas x:Name="DepthROICanvas" IsHitTestVisible="False"/>
                 </Grid>
             </Border>
         </Grid>
 
         <!-- Controls -->
-        <Border Grid.Row="2" Background="#333333" Padding="10">
+        <Border Grid.Row="3" Background="#333333" Padding="10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

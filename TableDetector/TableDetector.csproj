@@ -94,7 +94,12 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="MainWindow.DepthProcessing.cs" />
+    <Compile Include="MainWindow.Settings.cs" />
+    <Compile Include="MainWindow.TokenDetection.cs" />
     <Compile Include="MainWindow.Tokens.cs" />
+    <Compile Include="MainWindow.UI.cs" />
+    <Compile Include="MainWindow.WebSocket.cs" />
     <Compile Include="TTRPGToken.cs" />
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>

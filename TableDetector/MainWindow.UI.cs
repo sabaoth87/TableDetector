@@ -1,0 +1,648 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Shapes;
+
+namespace TableDetector
+{
+    public partial class MainWindow
+    {
+        #region MENU INTERACTIONS
+
+        /// <summary>
+        /// Event handler for the Show ROI menu item
+        /// </summary>
+        private void ShowROI_MenuClick(object sender, RoutedEventArgs e)
+        {
+            // Update the checkbox to match the menu item
+            ShowROICheckBox.IsChecked = ShowROIMenuItem.IsChecked;
+
+            // The checkbox's event handler will take care of the rest
+            ShowROI_Changed(sender, e);
+        }
+
+        /// <summary>
+        /// Event handler for the Angled View menu item
+        /// </summary>
+        private void AngledView_MenuClick(object sender, RoutedEventArgs e)
+        {
+            // Update the checkbox to match the menu item
+            AngledViewCheckBox.IsChecked = AngledViewMenuItem.IsChecked;
+
+            // The checkbox's event handler will take care of the rest
+            AngledView_Changed(sender, e);
+        }
+
+        /// <summary>
+        /// Event handler for the Track Tokens menu item
+        /// </summary>
+        private void TrackTokens_MenuClick(object sender, RoutedEventArgs e)
+        {
+            // Update the checkbox to match the menu item
+            TrackTokensCheckBox.IsChecked = TrackTokensMenuItem.IsChecked;
+
+            // The checkbox's event handler will take care of the rest
+            TrackTokens_Changed(sender, e);
+        }
+
+        /// <summary>
+        /// Event handler for the Show Token Labels menu item
+        /// </summary>
+        private void ShowTokenLabels_MenuClick(object sender, RoutedEventArgs e)
+        {
+            // Update the checkbox to match the menu item
+            ShowTokenLabelsCheckBox.IsChecked = ShowTokenLabelsMenuItem.IsChecked;
+
+            // The checkbox's event handler will take care of the rest
+            ShowTokenLabels_Changed(sender, e);
+        }
+
+        /// <summary>
+        /// Event handler for the About menu item
+        /// </summary>
+        private void About_Click(object sender, RoutedEventArgs e)
+        {
+            // Show a simple about dialog
+            MessageBox.Show(
+                "Table Detector for TTRPG\n" +
+                "Version 1.0\n\n" +
+                "Uses Kinect for Windows SDK to detect and track tokens on a tabletop surface.\n\n" +
+                "© 2025 Sabaoth/Army of Robot",
+                "About Table Detector",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        
+        #endregion
+
+        #region BUTTON CLICK EVENTS
+        /// <summary>
+        /// Event handler for the Export Settings menu item
+        /// </summary>
+        private void ExportSettings_Click(object sender, RoutedEventArgs e)
+        {
+            ExportSettings();
+        }
+
+        /// <summary>
+        /// Event handler for the Import Settings menu item
+        /// </summary>
+        private void ImportSettings_Click(object sender, RoutedEventArgs e)
+        {
+            ImportSettings();
+        }
+
+        /// <summary>
+        /// Event handler for the Reset Settings menu item
+        /// </summary>
+        private void ResetSettings_Click(object sender, RoutedEventArgs e)
+        {
+            ResetSettings();
+        }
+
+        /// <summary>
+        /// Event handler for the Exit menu item
+        /// </summary>
+        private void Exit_Click(object sender, RoutedEventArgs e)
+        {
+            // Close the application
+            this.Close();
+        }
+
+        // User Interacts with the 'Lock Table Depth' button
+        private void LockTable_Click(object sender, RoutedEventArgs e)
+        {
+            if (tableDepth > 0)
+            {
+                tableDepthLocked = true;
+                StatusText = $"Table depth locked at {tableDepth} mm";
+
+                // Auto-save this setting
+                AutoSaveSettings("Table Depth Lock");
+            }
+            else
+            {
+                StatusText = "Cannot lock table depth: No valid depth detected";
+            }
+        }
+
+        // User Interacts with the 'Unlock Table Depth' button
+        private void UnlockTable_Click(object sender, RoutedEventArgs e)
+        {
+            tableDepthLocked = false;
+            depthHistory.Clear(); // Reset history
+            StatusText = "Table depth detection switched to automatic mode";
+
+            // Auto-save this setting
+            AutoSaveSettings("Table Depth Lock");
+        }
+
+        // User Interacts with the 'Toggle Contours' button
+        private void ToggleContours_Click(object sender, RoutedEventArgs e)
+        {
+            showDepthContours = !showDepthContours;
+            if (showDepthContours)
+                StatusText = "Depth contours enabled";
+            else
+                StatusText = "Depth contours disabled";
+        }
+
+        private void FindLargestSurface_Click(object sender, RoutedEventArgs e)
+        {
+            // Force a new detection of the largest surface in the scene
+            tableDepthLocked = false;
+            depthHistory.Clear();  // Clear history to start fresh
+
+            // Force more aggressive scanning
+            depthThreshold = isAngledView ? ANGLED_DEG_MAX : ANGLED_DEG_MIN;  // Increase threshold for angled views
+
+            // Run the detection algorithm
+            DetermineTableSurfaceDepthExhaustive();
+
+            StatusText = $"Searching for largest flat surface...";
+
+            // Update the display
+            ProcessDepthData();
+
+            this.Dispatcher.Invoke(() => {
+                this.depthBitmap.Lock();
+                Marshal.Copy(depthPixels, 0, this.depthBitmap.BackBuffer, depthPixels.Length);
+                this.depthBitmap.AddDirtyRect(new Int32Rect(0, 0, depthWidth, depthHeight));
+                this.depthBitmap.Unlock();
+
+                StatusText = $"Found largest surface at depth: {tableDepth} mm";
+            });
+        }
+
+        /// <summary>
+        /// Click the diagnose button?
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void Diagnose_Click(object sender, RoutedEventArgs e)
+        {
+            // Create a diagnostic message
+            string message = $"=== TABLE DEPTH DIAGNOSTIC ===\n" +
+                             $"Current table depth: {tableDepth} mm\n" +
+                             $"Table depth locked: {tableDepthLocked}\n" +
+                             $"Depth history buffer size: {depthHistory.Count}\n" +
+                             $"Contours enabled: {showDepthContours}\n" +
+                             $"Angled view mode: {isAngledView}\n" +
+                             $"Depth threshold: {depthThreshold} mm\n";
+
+            // Sample the current histogram
+            Dictionary<ushort, int> quickHistogram = new Dictionary<ushort, int>();
+            int sampleCount = 0;
+
+            if (depthData != null && depthData.Length > 0)
+            {
+                for (int i = 0; i < depthData.Length; i += 20) // Sample sparsely
+                {
+                    ushort depth = depthData[i];
+                    if (depth > 400 && depth < 4000) // Only consider reasonable depths
+                    {
+                        if (!quickHistogram.ContainsKey(depth))
+                            quickHistogram[depth] = 0;
+                        quickHistogram[depth]++;
+                        sampleCount++;
+                    }
+                }
+
+                message += $"\nDepth Frame: {sampleCount} samples analyzed\n";
+
+                if (sampleCount > 0)
+                {
+                    // Find the most common depth
+                    ushort mostCommonDepth = 0;
+                    int mostCommonCount = 0;
+
+                    // Convert to list for sorting
+                    List<KeyValuePair<ushort, int>> pairs = new List<KeyValuePair<ushort, int>>(quickHistogram);
+                    pairs.Sort((a, b) => b.Value.CompareTo(a.Value)); // Sort descending by count
+
+                    if (pairs.Count > 0)
+                    {
+                        mostCommonDepth = pairs[0].Key;
+                        mostCommonCount = pairs[0].Value;
+
+                        double percentage = 100.0 * mostCommonCount / sampleCount;
+                        message += $"Most common depth: {mostCommonDepth}mm ({percentage:F1}% of samples)\n";
+
+                        // Show top 5 most common depths
+                        message += "Top depth values:\n";
+                        int rank = 1;
+                        foreach (var pair in pairs.Take(5))
+                        {
+                            double pct = 100.0 * pair.Value / sampleCount;
+                            message += $"  {rank}. {pair.Key}mm: {pair.Value} samples ({pct:F1}%)\n";
+                            rank++;
+                        }
+                    }
+                }
+            }
+
+            // Display in a message box
+            MessageBox.Show(message, "Table Depth Diagnostic", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        #endregion
+
+        private void ShowTuningInterface_Click(object sender, RoutedEventArgs e)
+        {
+            var tuningWindow = new Window
+            {
+                Title = "Depth & Token Tuning",
+                Width = 500,
+                Height = 600,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+
+            var panel = new StackPanel { Margin = new Thickness(10) };
+
+            // Add depth threshold slider
+            panel.Children.Add(new TextBlock { Text = "Depth Threshold (mm):" });
+            var depthThresholdSlider = new Slider
+            {
+                Minimum = 5,
+                Maximum = 50,
+                Value = depthThreshold,
+                TickFrequency = 5,
+                TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight,
+                IsSnapToTickEnabled = true
+            };
+
+            depthThresholdSlider.ValueChanged += (s, args) =>
+            {
+                depthThreshold = (int)args.NewValue;
+                // Update status
+            };
+
+            panel.Children.Add(depthThresholdSlider);
+
+            // Add more sliders for other parameters...
+
+            // Add a preview section
+
+            tuningWindow.Content = panel;
+            tuningWindow.ShowDialog();
+        }
+
+        private void ManualROISelect_Click(object sender, RoutedEventArgs e)
+        {
+            StatusText = "Click and drag on the depth image to manually select table area";
+            // Enable mouse event handlers for selection
+        }
+
+        private void CalibrateTokenHeight_Click(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show("Place a token with known height (e.g., 25mm) on the table and click OK");
+            // Then detect the token and use it to calibrate height measurements
+        }
+
+        #region ROI INTERACTIONS
+
+        // Add these event handlers for mouse interactions
+        private void Image_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // Start ROI selection
+            Image image = sender as Image;
+            if (image != null)
+            {
+                // Get the position relative to the image
+                startPoint = e.GetPosition(image);
+                isDragging = true;
+
+                /*
+                // Determine which canvas to use based on source
+                if (image == ColorImage)
+                {
+                    currentCanvas = ColorROICanvas;
+                }
+                else if (image == DepthImage)
+                {
+                    currentCanvas = DepthROICanvas;
+                }
+                */
+                currentCanvas = DepthROICanvas;
+
+                // Clear existing selection rectangle
+                if (currentCanvas is Canvas canvas)
+                {
+                    canvas.Children.Clear();
+
+                    // Create a new rectangle
+                    selectionRectangle = new Rectangle
+                    {
+                        Stroke = new SolidColorBrush(Colors.Yellow),
+                        StrokeThickness = 2,
+                        StrokeDashArray = new DoubleCollection { 4, 2 }
+                    };
+
+                    Canvas.SetLeft(selectionRectangle, startPoint.X);
+                    Canvas.SetTop(selectionRectangle, startPoint.Y);
+                    canvas.Children.Add(selectionRectangle);
+                }
+
+                // Capture mouse to ensure we get mouse move events
+                image.CaptureMouse();
+
+                StatusText = $"Creating ROI - Click and drag to define region";
+            }
+        }
+
+        private void Image_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (isDragging && selectionRectangle != null && currentCanvas is Canvas canvas)
+            {
+                Image image = sender as Image;
+                if (image != null)
+                {
+                    // Get current position
+                    Point currentPoint = e.GetPosition(image);
+
+                    // Calculate rectangle dimensions
+                    double x = Math.Min(startPoint.X, currentPoint.X);
+                    double y = Math.Min(startPoint.Y, currentPoint.Y);
+                    double width = Math.Abs(currentPoint.X - startPoint.X);
+                    double height = Math.Abs(currentPoint.Y - startPoint.Y);
+
+                    // Update rectangle position and size
+                    Canvas.SetLeft(selectionRectangle, x);
+                    Canvas.SetTop(selectionRectangle, y);
+                    selectionRectangle.Width = width;
+                    selectionRectangle.Height = height;
+
+                    // Update status
+                    StatusText = $"ROI: ({x:F0},{y:F0}) to ({x + width:F0},{y + height:F0})";
+                }
+            }
+        }
+
+        private void Image_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (isDragging && selectionRectangle != null)
+            {
+                Image image = sender as Image;
+                if (image != null)
+                {
+                    // Release mouse capture
+                    image.ReleaseMouseCapture();
+
+                    Point currentPoint = e.GetPosition(image);
+
+                    // Calculate final rectangle dimensions
+                    double x = Math.Min(startPoint.X, currentPoint.X);
+                    double y = Math.Min(startPoint.Y, currentPoint.Y);
+                    double width = Math.Abs(currentPoint.X - startPoint.X);
+                    double height = Math.Abs(currentPoint.Y - startPoint.Y);
+
+                    // Only proceed if we have a valid sized rectangle
+                    if (width > 10 && height > 10)
+                    {
+                        // Convert from UI coordinates to image coordinates
+                        double scaleX, scaleY;
+
+                        if (image == ColorImage)
+                        {
+                            scaleX = colorWidth / image.ActualWidth;
+                            scaleY = colorHeight / image.ActualHeight;
+                        }
+                        else // DepthImage
+                        {
+                            scaleX = depthWidth / image.ActualWidth;
+                            scaleY = depthHeight / image.ActualHeight;
+                        }
+
+                        // Create the ROI in image coordinates
+                        detectedTableROI = new Rect(
+                            x * scaleX,
+                            y * scaleY,
+                            width * scaleX,
+                            height * scaleY);
+
+                        // If ROI is from depth image, analyze depth data within ROI
+                        if (image == DepthImage && depthData != null)
+                        {
+                            AnalyzeROIDepth();
+                        }
+
+                        StatusText = $"ROI set: {detectedTableROI.X:F0},{detectedTableROI.Y:F0} " +
+                                     $"({detectedTableROI.Width:F0}x{detectedTableROI.Height:F0})";
+                    }
+                    else
+                    {
+                        StatusText = "ROI too small - please try again with a larger selection";
+
+                        // Clear the small selection
+                        if (currentCanvas is Canvas canvas)
+                        {
+                            canvas.Children.Clear();
+                        }
+                    }
+
+                    // Reset dragging state
+                    isDragging = false;
+                    selectionRectangle = null;
+                    currentCanvas = null;
+                }
+            }
+        }
+
+        private void ExtractROI_Click(object sender, RoutedEventArgs e)
+        {
+            // Extract ROI data in a format that can be used by the main application
+            if (detectedTableROI.Width > 0 && detectedTableROI.Height > 0)
+            {
+                // Format the ROI data as a JSON-like string
+                string roiData = $@"{{
+                                ""X"": {(int)detectedTableROI.X},
+                                ""Y"": {(int)detectedTableROI.Y},
+                                ""Width"": {(int)detectedTableROI.Width},
+                                ""Height"": {(int)detectedTableROI.Height},
+                                ""TableDepth"": {tableDepth},
+                                ""DepthThreshold"": {depthThreshold}
+                            }}";
+
+                // Show dialog with data
+                MessageBox.Show(roiData, "ROI Data", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                // Optional: Copy to clipboard for easy pasting into the main application
+                try
+                {
+                    Clipboard.SetText(roiData);
+                    StatusText = "ROI data copied to clipboard";
+                }
+                catch (Exception ex)
+                {
+                    StatusText = $"Failed to copy to clipboard: {ex.Message}";
+                }
+            }
+            else
+            {
+                MessageBox.Show("No valid ROI detected yet. Please detect a table surface first.",
+                               "ROI Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void ShowROI_Changed(object sender, RoutedEventArgs e)
+        {
+            showROIOverlay = ShowROICheckBox.IsChecked ?? true;
+            StatusText = showROIOverlay ?
+                "ROI overlay enabled" :
+                "ROI overlay disabled";
+
+            // Auto-save this setting
+            AutoSaveSettings("ROI Overlay");
+        }
+
+
+        #endregion
+
+        #region COMPONENT INIT
+
+        /// <summary>
+        /// Creates the TokenTypeComboBox if it doesn't exist already
+        /// </summary>
+        private void InitializeTokenTypeComboBox()
+        {
+            // If the combo box doesn't exist in XAML, create it programmatically
+            if (TokenTypeComboBox == null)
+            {
+                TokenTypeComboBox = new ComboBox
+                {
+                    Width = 120,
+                    Margin = new Thickness(25, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                // Add token type options
+                TokenTypeComboBox.Items.Add("Small Token");
+                TokenTypeComboBox.Items.Add("Medium Token");
+                TokenTypeComboBox.Items.Add("Large Token");
+                TokenTypeComboBox.Items.Add("Miniature");
+                TokenTypeComboBox.Items.Add("Dice");
+                TokenTypeComboBox.Items.Add("Custom");
+                TokenTypeComboBox.SelectedIndex = 0;
+
+                // Find a place to add it in the UI - this might need adjustment based on your XAML structure
+                var tokenTrackingPanel = this.FindName("TokenTrackingPanel") as StackPanel;
+                if (tokenTrackingPanel != null)
+                {
+                    var label = new TextBlock
+                    {
+                        Text = "Token Type:",
+                        Foreground = new SolidColorBrush(Colors.White),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(10, 0, 0, 0)
+                    };
+
+                    tokenTrackingPanel.Children.Add(label);
+                    tokenTrackingPanel.Children.Add(TokenTypeComboBox);
+                }
+                else
+                {
+                    // If we can't find the panel, create a contingency plan
+                    // This assumes the last row in your Grid is for token tracking controls
+                    var mainGrid = this.Content as Grid;
+                    if (mainGrid != null && mainGrid.RowDefinitions.Count > 0)
+                    {
+                        var lastRow = mainGrid.RowDefinitions.Count - 1;
+
+                        var container = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Margin = new Thickness(0, 5, 0, 0)
+                        };
+
+                        var label = new TextBlock
+                        {
+                            Text = "Token Type:",
+                            Foreground = new SolidColorBrush(Colors.White),
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+
+                        container.Children.Add(label);
+                        container.Children.Add(TokenTypeComboBox);
+
+                        Grid.SetRow(container, lastRow);
+                        mainGrid.Children.Add(container);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Initializes UI control references after the window loads
+        /// </summary>
+        private void InitializeControlReferences()
+        {
+            // Find and store references to UI controls
+            TokenTypeComboBox = this.FindName("TokenTypeComboBox") as ComboBox;
+            TrackTokensCheckBox = this.FindName("TrackTokensCheckBox") as CheckBox;
+            ShowTokenLabelsCheckBox = this.FindName("ShowTokenLabelsCheckBox") as CheckBox;
+            TokenSizeThresholdSlider = this.FindName("TokenSizeThresholdSlider") as Slider;
+            TokenOverlayCanvas = this.FindName("TokenOverlayCanvas") as Canvas;
+
+            // Find menu items
+            ShowROIMenuItem = this.FindName("ShowROIMenuItem") as MenuItem;
+            AngledViewMenuItem = this.FindName("AngledViewMenuItem") as MenuItem;
+            ShowDepthContoursMenuItem = this.FindName("ShowDepthContoursMenuItem") as MenuItem;
+            TrackTokensMenuItem = this.FindName("TrackTokensMenuItem") as MenuItem;
+            ShowTokenLabelsMenuItem = this.FindName("ShowTokenLabelsMenuItem") as MenuItem;
+
+            // If TokenTypeComboBox isn't found in XAML, create it programmatically
+            if (TokenTypeComboBox == null)
+            {
+                InitializeTokenTypeComboBox();
+            }
+
+            // Set initial values for checkboxes
+            if (TrackTokensCheckBox != null)
+                TrackTokensCheckBox.IsChecked = trackTokens;
+
+            if (ShowTokenLabelsCheckBox != null)
+                ShowTokenLabelsCheckBox.IsChecked = showTokenLabels;
+
+            if (TokenSizeThresholdSlider != null)
+                TokenSizeThresholdSlider.Value = tokenDetectionThreshold;
+
+            // Set angled view checkbox
+            if (AngledViewCheckBox != null)
+                AngledViewCheckBox.IsChecked = isAngledView;
+
+            // Set show ROI checkbox
+            if (ShowROICheckBox != null)
+                ShowROICheckBox.IsChecked = showROIOverlay;
+
+            // Set menu item states to match current settings
+            if (ShowROIMenuItem != null)
+                ShowROIMenuItem.IsChecked = showROIOverlay;
+
+            if (AngledViewMenuItem != null)
+                AngledViewMenuItem.IsChecked = isAngledView;
+
+            if (ShowDepthContoursMenuItem != null)
+                ShowDepthContoursMenuItem.IsChecked = showDepthContours;
+
+            if (TrackTokensMenuItem != null)
+                TrackTokensMenuItem.IsChecked = trackTokens;
+
+            if (ShowTokenLabelsMenuItem != null)
+                ShowTokenLabelsMenuItem.IsChecked = showTokenLabels;
+
+            // Update status displays
+            TableDepthText = $"{tableDepth} mm" + (tableDepthLocked ? " (locked)" : "");
+        }
+
+        #endregion
+
+
+    }
+}
