@@ -94,7 +94,9 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="MainWindow.Debug.cs" />
     <Compile Include="MainWindow.DepthProcessing.cs" />
+    <Compile Include="MainWindow.GridMapping.cs" />
     <Compile Include="MainWindow.Settings.cs" />
     <Compile Include="MainWindow.TokenDetection.cs" />
     <Compile Include="MainWindow.Tokens.cs" />

@@ -192,71 +192,6 @@ namespace TableDetector
         }
 
         /// <summary>
-        /// Processes incoming messages from Foundry VTT clients
-        /// </summary>
-        private void ProcessIncomingMessage(string message)
-        {
-            try
-            {
-                // Parse JSON message
-                using (JsonDocument doc = JsonDocument.Parse(message))
-                {
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("command", out var command))
-                    {
-                        string cmd = command.GetString();
-
-                        // Handle different commands
-                        switch (cmd)
-                        {
-                            case "requestTokens":
-                                // Client is requesting a fresh token update
-                                SendTokenUpdatesToClients().Wait();
-                                break;
-
-                            case "updateSettings":
-                                // Client is updating settings
-                                if (root.TryGetProperty("autoSync", out var autoSync))
-                                {
-                                    autoSyncWithFoundry = autoSync.GetBoolean();
-                                }
-                                break;
-
-                            case "assignLabel":
-                                // Client is assigning a label to a token
-                                if (root.TryGetProperty("tokenId", out var tokenId) &&
-                                    root.TryGetProperty("label", out var label))
-                                {
-                                    var tokenIdStr = tokenId.GetString();
-                                    var labelStr = label.GetString();
-
-                                    // Find and update token
-                                    var token = detectedTokens.FirstOrDefault(t => t.Id.ToString() == tokenIdStr);
-                                    if (token != null)
-                                    {
-                                        token.Label = labelStr;
-                                        Dispatcher.Invoke(() =>
-                                        {
-                                            UpdateTokenOverlay();
-                                            StatusText = $"Updated token label: {labelStr}";
-                                        });
-                                    }
-                                }
-                                break;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    StatusText = $"Error processing message: {ex.Message}";
-                });
-            }
-        }
-
-        /// <summary>
         /// Sends token data to a specific client
         /// </summary>
         private async Task SendTokenDataToClient(WebSocket webSocket)
@@ -328,15 +263,254 @@ namespace TableDetector
         }
 
         /// <summary>
+        /// Convert token type color to hex for Foundry VTT
+        /// </summary>
+        private string GetTokenHexColor(TokenType type)
+        {
+            System.Windows.Media.Color color = GetTokenTypeColor(type);
+            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        }
+
+        /// <summary>
+        /// Improved helper method to determine appropriate size for Foundry
+        /// </summary>
+        private double GetSizeForFoundry(TTRPGToken token)
+        {
+            switch (token.Type)
+            {
+                case TokenType.SmallToken:
+                    return 1.0;
+                case TokenType.MediumToken:
+                    return 1.0;
+                case TokenType.LargeToken:
+                    return 2.0;
+                case TokenType.Miniature:
+                    // More sophisticated size calculation for miniatures based on actual dimensions
+                    double diameter = token.DiameterMeters * 39.37; // Convert to inches
+
+                    // Standard D&D sizes: Tiny (0.5), Small (1), Medium (1), Large (2), Huge (3), Gargantuan (4)
+                    if (diameter < 0.75) return 0.5; // Tiny
+                    if (diameter < 1.5) return 1.0; // Small/Medium
+                    if (diameter < 2.5) return 2.0; // Large
+                    if (diameter < 3.5) return 3.0; // Huge
+                    return 4.0; // Gargantuan
+
+                case TokenType.Dice:
+                    return 0.5; // Dice are usually small tokens
+                default:
+                    return 1.0;
+            }
+        }
+
+        /// <summary>
+        /// Processes incoming messages from Foundry VTT clients with enhanced functionality
+        /// </summary>
+        private void ProcessIncomingMessage(string message)
+        {
+            try
+            {
+                // Parse JSON message
+                using (JsonDocument doc = JsonDocument.Parse(message))
+                {
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("command", out var command))
+                    {
+                        string cmd = command.GetString();
+
+                        // Handle different commands
+                        switch (cmd)
+                        {
+                            case "requestTokens":
+                                // Client is requesting a fresh token update
+                                SendTokenUpdatesToClients().Wait();
+                                break;
+
+                            case "updateSettings":
+                                // Client is updating settings
+                                if (root.TryGetProperty("autoSync", out var autoSync))
+                                {
+                                    autoSyncWithFoundry = autoSync.GetBoolean();
+                                }
+
+                                // Add ability to adjust detection settings from Foundry
+                                if (root.TryGetProperty("detectionSensitivity", out var sensitivity))
+                                {
+                                    miniDetectionSensitivity = Math.Max(3, Math.Min(30, sensitivity.GetInt32()));
+                                }
+
+                                if (root.TryGetProperty("miniatureHeight", out var height))
+                                {
+                                    maxMiniatureHeight = Math.Max(30, Math.Min(200, height.GetInt32()));
+                                }
+                                break;
+
+                            case "assignLabel":
+                                // Client is assigning a label to a token
+                                if (root.TryGetProperty("tokenId", out var tokenId) &&
+                                    root.TryGetProperty("label", out var label))
+                                {
+                                    var tokenIdStr = tokenId.GetString();
+                                    var labelStr = label.GetString();
+
+                                    // Find and update token
+                                    var token = detectedTokens.FirstOrDefault(t => t.Id.ToString() == tokenIdStr);
+                                    if (token != null)
+                                    {
+                                        token.Label = labelStr;
+                                        Dispatcher.Invoke(() =>
+                                        {
+                                            UpdateTokenOverlay();
+                                            StatusText = $"Updated token label: {labelStr}";
+                                        });
+                                    }
+                                }
+                                break;
+
+                            case "requestStatus":
+                                // Client is requesting system status
+                                SendSystemStatusToClients().Wait();
+                                break;
+
+                            case "setTokenType":
+                                // Client is setting a token type
+                                if (root.TryGetProperty("tokenId", out var typeTokenId) &&
+                                    root.TryGetProperty("type", out var typeValue))
+                                {
+                                    var tokenIdStr = typeTokenId.GetString();
+                                    var typeStr = typeValue.GetString();
+
+                                    // Parse the token type
+                                    if (Enum.TryParse<TokenType>(typeStr, true, out TokenType parsedType))
+                                    {
+                                        // Find and update token
+                                        var token = detectedTokens.FirstOrDefault(t => t.Id.ToString() == tokenIdStr);
+                                        if (token != null)
+                                        {
+                                            token.Type = parsedType;
+                                            Dispatcher.Invoke(() =>
+                                            {
+                                                UpdateTokenOverlay();
+                                                StatusText = $"Updated token type: {typeStr}";
+                                            });
+                                        }
+                                    }
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    StatusText = $"Error processing message: {ex.Message}";
+                });
+            }
+        }
+
+        /// <summary>
+        /// Sends system status information to all connected clients
+        /// </summary>
+        private async Task SendSystemStatusToClients()
+        {
+            var statusData = new
+            {
+                type = "systemStatus",
+                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                isReady = IsReadyForTokenDetection(),
+                hasValidROI = hasValidROI,
+                hasValidTableDepth = hasValidTableDepth,
+                tableDepth = tableDepth,
+                tokenCount = detectedTokens.Count,
+                roi = new
+                {
+                    x = (int)detectedTableROI.X,
+                    y = (int)detectedTableROI.Y,
+                    width = (int)detectedTableROI.Width,
+                    height = (int)detectedTableROI.Height
+                },
+                detection = new
+                {
+                    minTokenHeight = MIN_TOKEN_HEIGHT,
+                    maxMiniatureHeight = maxMiniatureHeight,
+                    sensitivity = miniDetectionSensitivity,
+                    updateInterval = tokenUpdateInterval.TotalMilliseconds
+                }
+            };
+
+            string json = JsonSerializer.Serialize(statusData);
+            byte[] data = Encoding.UTF8.GetBytes(json);
+
+            // Send to all connected clients
+            WebSocket[] connections;
+            lock (activeConnections)
+            {
+                connections = activeConnections.ToArray();
+            }
+
+            foreach (var webSocket in connections)
+            {
+                if (webSocket.State != WebSocketState.Open)
+                    continue;
+
+                try
+                {
+                    await webSocket.SendAsync(
+                        new ArraySegment<byte>(data),
+                        WebSocketMessageType.Text,
+                        true,
+                        CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // Handle connection errors - will be cleaned up on next receive
+                }
+            }
+        }
+
+        /// <summary>
         /// Creates JSON token update data for Foundry VTT
         /// </summary>
         private string CreateTokenUpdateData()
         {
-            // Create token data in Foundry VTT compatible format
+            // Use the color-enhanced version if color detection is enabled
+            if (enableColorDetection)
+            {
+                return CreateTokenUpdateDataWithColor();
+            }
+
+            // If grid mapping is active, use the mapped positions
+            if (isGridMappingActive)
+            {
+                return CreateTokenUpdateDataWithMapping();
+            }
+
+            // Otherwise, use the original format
+            // Only send updates if we have a valid detection setup
+            if (!IsReadyForTokenDetection() || detectedTokens.Count == 0)
+            {
+                // Create a status-only update when no tokens are available
+                var statusUpdate = new
+                {
+                    type = "statusUpdate",
+                    timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                    status = hasValidROI && hasValidTableDepth ? "ready" : "notReady",
+                    message = !hasValidROI ? "Define ROI on depth image" :
+                             !hasValidTableDepth ? "Table depth not detected" : "Ready",
+                    tokenCount = 0
+                };
+
+                return JsonSerializer.Serialize(statusUpdate);
+            }
+
+            // Create token data in Foundry VTT compatible format with improved metadata
             var tokenUpdate = new
             {
                 type = "tokenUpdate",
                 timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                tableDepth = tableDepth,
+                status = "active",
                 tokens = detectedTokens.Select(t => new
                 {
                     id = t.Id.ToString(),
@@ -348,8 +522,74 @@ namespace TableDetector
                     height = GetSizeForFoundry(t),
                     width = GetSizeForFoundry(t),
                     type = t.Type.ToString(),
+                    // Additional metadata
                     heightMm = t.HeightMm,
-                    diameterMm = t.DiameterMeters * 1000 // Convert meters to mm
+                    diameterMm = t.DiameterMeters * 1000, // Convert meters to mm
+                                                          // Include properties for visualization in Foundry
+                    isHumanoid = t.Type == TokenType.Miniature,
+                    tokenColor = GetTokenHexColor(t.Type)
+                }).ToArray()
+            };
+
+            return JsonSerializer.Serialize(tokenUpdate);
+        }
+
+        // If Mapping is enabled
+        private string CreateTokenUpdateDataWithMapping()
+        {
+            // Only send updates if we have a valid detection setup
+            if (!IsReadyForTokenDetection() || detectedTokens.Count == 0)
+            {
+                // Create a status-only update when no tokens are available
+                var statusUpdate = new
+                {
+                    type = "statusUpdate",
+                    timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                    status = hasValidROI && hasValidTableDepth ? "ready" : "notReady",
+                    message = !hasValidROI ? "Define ROI on depth image" :
+                             !hasValidTableDepth ? "Table depth not detected" : "Ready",
+                    tokenCount = 0,
+                    gridMappingActive = isGridMappingActive
+                };
+
+                return JsonSerializer.Serialize(statusUpdate);
+            }
+
+            // Create token data with grid mapping included
+            var tokenUpdate = new
+            {
+                type = "tokenUpdate",
+                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                tableDepth = tableDepth,
+                status = "active",
+                gridMappingActive = isGridMappingActive,
+                gridSettings = new
+                {
+                    physicalGridSize = currentGridMapping.PhysicalGridSize,
+                    virtualGridSize = currentGridMapping.VirtualGridSize,
+                    rotation = currentGridMapping.PhysicalRotation,
+                    scale = currentGridMapping.VirtualScale
+                },
+                tokens = detectedTokens.Select(t => new
+                {
+                    id = t.Id.ToString(),
+                    name = !string.IsNullOrEmpty(t.Label) ? t.Label : GetTokenTypeString(t.Type),
+                    // Use the mapped position if available, otherwise use the standard position
+                    x = isGridMappingActive ? t.FoundryPosition.X : (t.RealWorldPosition.X * 39.37),
+                    y = isGridMappingActive ? t.FoundryPosition.Y : (t.RealWorldPosition.Y * 39.37),
+                    // Include the original position for reference
+                    originalX = t.RealWorldPosition.X * 39.37,
+                    originalY = t.RealWorldPosition.Y * 39.37,
+                    elevation = 0,
+                    height = GetSizeForFoundry(t),
+                    width = GetSizeForFoundry(t),
+                    type = t.Type.ToString(),
+                    // Additional metadata
+                    heightMm = t.HeightMm,
+                    diameterMm = t.DiameterMeters * 1000, // Convert meters to mm
+                                                          // Include properties for visualization in Foundry
+                    isHumanoid = t.Type == TokenType.Miniature,
+                    tokenColor = GetTokenHexColor(t.Type)
                 }).ToArray()
             };
 

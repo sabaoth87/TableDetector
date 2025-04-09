@@ -10,7 +10,6 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Settings Menu -->
@@ -41,6 +40,10 @@
                 <MenuItem Header="Find Largest Surface" Click="FindLargestSurface_Click"/>
                 <MenuItem Header="Lock Table Depth" Click="LockTable_Click"/>
                 <MenuItem Header="Unlock Table Depth" Click="UnlockTable_Click"/>
+                <Separator/>
+                <MenuItem Header="Height Profile Debugging" Click="ToggleHeightProfileDebugging_Click" IsCheckable="True" x:Name="HeightProfileMenuItem"/>
+                <MenuItem Header="Color Detection Settings" Click="ShowColorMappingDialog_Click"/>
+                <MenuItem Header="Grid Mapping Configuration" Click="ShowGridMappingWindow_Click"/>
                 <Separator/>
                 <MenuItem Header="Diagnostic Info..." Click="Diagnose_Click"/>
             </MenuItem>
@@ -94,7 +97,8 @@
         <Border Grid.Row="3" Background="#333333" Padding="10">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
@@ -132,6 +136,16 @@
                     <Button Content="Calibrate Tokens" Click="CalibrateTokens_Click" Margin="20,0,0,0" Padding="5,2"/>
                     <Button Content="Clear Tokens" Click="ClearTokens_Click" Margin="5,0,0,0" Padding="5,2"/>
                     <Button Content="Save Token Map" Click="SaveTokenMap_Click" Margin="5,0,0,0" Padding="5,2"/>
+                </StackPanel>
+
+                <!-- Color Detection Controls -->
+                <StackPanel Grid.Row="2" Grid.Column="0" Orientation="Horizontal" Margin="0,10,0,0" Name="AdvancedFeaturesPanel">
+                    <TextBlock Text="Advanced Features:" Foreground="White" VerticalAlignment="Center"/>
+                    <CheckBox Content="Color Detection" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
+                        VerticalAlignment="Center" x:Name="ColorDetectionCheckBox" Checked="ColorDetection_Changed" Unchecked="ColorDetection_Changed"/>
+                    <CheckBox Content="Grid Mapping" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
+                        VerticalAlignment="Center" x:Name="GridMappingCheckBox" Checked="GridMapping_Changed" Unchecked="GridMapping_Changed"/>
+                    <Button Content="Configure" Click="ConfigureAdvancedFeatures_Click" Margin="10,0,0,0" Padding="5,2"/>
                 </StackPanel>
             </Grid>
         </Border>

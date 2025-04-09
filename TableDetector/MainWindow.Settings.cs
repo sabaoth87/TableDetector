@@ -265,7 +265,10 @@ namespace TableDetector
                     {
                         MinTokenHeight = MIN_TOKEN_HEIGHT,
                         MaxTokenHeight = MAX_TOKEN_HEIGHT,
+                        MaxMiniatureHeight = maxMiniatureHeight,
                         TokenDetectionThreshold = tokenDetectionThreshold,
+                        MiniDetectionSensitivity = miniDetectionSensitivity,
+                        MiniatureBaseThreshold = miniatureBaseThreshold,
                         TrackTokens = trackTokens,
                         ShowTokenLabels = showTokenLabels,
                         TokenUpdateIntervalMs = tokenUpdateInterval.TotalMilliseconds
@@ -286,7 +289,7 @@ namespace TableDetector
                     TableDepthLocked = tableDepthLocked,
 
                     // Version info for backward compatibility
-                    Version = "1.0",
+                    Version = "1.1",
                     LastSaved = DateTime.Now
                 };
 
@@ -304,7 +307,7 @@ namespace TableDetector
                 StatusText = $"Error saving settings: {ex.Message}";
             }
         }
-
+        
         /// <summary>
         /// Loads application settings from a JSON file
         /// </summary>

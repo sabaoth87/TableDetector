@@ -58,7 +58,7 @@ namespace TableDetector
         /// <summary>
         /// Color assigned to this token for visualization
         /// </summary>
-        public System.Windows.Media.Color Color { get; set; } = System.Windows.Media.Colors.Yellow;
+        public System.Windows.Media.Color Color { get; set; } = System.Windows.Media.Colors.Gray;
 
         /// <summary>
         /// Label for the token (can be assigned by the user)
@@ -84,6 +84,26 @@ namespace TableDetector
         /// Maximum length of position history to maintain
         /// </summary>
         private const int MaxHistoryLength = 20;
+        
+        /// <summary>
+        /// The category of the token based on color
+        /// </summary>
+        public string ActorCategory { get; set; } = "Unknown";
+
+        /// <summary>
+        /// The type of actor in the game
+        /// </summary>
+        public string ActorType { get; set; } = "unknown";
+
+        /// <summary>
+        /// Whether the token is hostile
+        /// </summary>
+        public bool IsHostile { get; set; } = false;
+
+        /// <summary>
+        /// Position in Foundry VTT grid coordinates after mapping
+        /// </summary>
+        public Point FoundryPosition { get; set; }
 
         /// <summary>
         /// Updates the token position and adds it to the history

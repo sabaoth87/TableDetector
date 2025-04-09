@@ -881,7 +881,7 @@ namespace TableDetector
             }
         }
 
-        // 
+        // Updated 2025-04-08
         private void Reader_MultiSourceFrameArrived(object sender, MultiSourceFrameArrivedEventArgs e)
         {
             // Get reference to the multi frame
@@ -958,14 +958,26 @@ namespace TableDetector
                         // Check if it's time to update token tracking
                         if (trackTokens && DateTime.Now - lastTokenUpdateTime > tokenUpdateInterval)
                         {
-                            //DetectTokens();
-                            DetectTokensEnhanced();
+                            // Use the appropriate token detection method based on enabled features
+                            if (enableColorDetection)
+                            {
+                                // Use the enhanced method with color detection
+                                DetectTokensWithColor();
+                            }
+                            else
+                            {
+                                // Use the standard enhanced method
+                                DetectTokensEnhanced();
+                            }
+
+                            // If grid mapping is active, apply transformations
+                            if (isGridMappingActive)
+                            {
+                                ApplyGridMappingToTokens();
+                            }
+
                             lastTokenUpdateTime = DateTime.Now;
                         }
-
-                        // TODO NOTE Dev removal
-                        // Process depth into visualization
-                        //ProcessDepthData();
 
                         // Write to bitmap source
                         this.Dispatcher.Invoke(() => {
@@ -994,7 +1006,6 @@ namespace TableDetector
                 });
             }
         }
-        
         /// <summary>
         /// Detects the region of interest that defines the table surface
         /// </summary>

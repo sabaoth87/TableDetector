@@ -67,7 +67,7 @@ namespace TableDetector
         /// <summary>
         /// Calibrates token detection thresholds
         /// </summary>
-        private void CalibrateTokens_Click(object sender, RoutedEventArgs e)
+        private void CalibrateTokens_ClickOld(object sender, RoutedEventArgs e)
         {
             // Create a calibration dialog
             var dialog = new Window
@@ -197,7 +197,7 @@ namespace TableDetector
             testButton.Click += (s, args) =>
             {
                 // Force a detection cycle
-                DetectTokens();
+                //DetectTokens();
                 StatusText = $"Detected {detectedTokens.Count} objects with current settings";
             };
 
@@ -243,7 +243,7 @@ namespace TableDetector
             StatusText = "Token and miniature calibration updated";
         }
 
-        private void CalibrateTokens_ClickOld(object sender, RoutedEventArgs e)
+        private void CalibrateTokens_ClickOlder(object sender, RoutedEventArgs e)
         {
             // Create a calibration dialog
             var dialog = new Window

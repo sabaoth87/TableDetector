@@ -643,6 +643,200 @@ namespace TableDetector
 
         #endregion
 
+        /// <summary>
+        /// Event handler for toggling height profile debugging
+        /// </summary>
+        private void ToggleHeightProfileDebugging_Click(object sender, RoutedEventArgs e)
+        {
+            ToggleHeightProfileDebugging();
 
+            // Update menu item checked state
+            if (HeightProfileMenuItem != null)
+            {
+                HeightProfileMenuItem.IsChecked = showHeightProfileDebugging;
+            }
+        }
+
+        /// <summary>
+        /// Event handler for showing color mapping dialog
+        /// </summary>
+        private void ShowColorMappingDialog_Click(object sender, RoutedEventArgs e)
+        {
+            ShowColorMappingDialog();
+        }
+
+        /// <summary>
+        /// Event handler for showing grid mapping window
+        /// </summary>
+        private void ShowGridMappingWindow_Click(object sender, RoutedEventArgs e)
+        {
+            ShowGridMappingWindow();
+        }
+
+        /// <summary>
+        /// Event handler for toggling color detection
+        /// </summary>
+        private void ColorDetection_Changed(object sender, RoutedEventArgs e)
+        {
+            enableColorDetection = ColorDetectionCheckBox.IsChecked ?? false;
+
+            if (enableColorDetection && colorToActorMappings.Count == 0)
+            {
+                InitializeColorDetection();
+            }
+
+            StatusText = enableColorDetection ?
+                "Color detection enabled - tokens will be categorized by color" :
+                "Color detection disabled";
+
+            // Auto-save this setting
+            AutoSaveSettings("Color Detection");
+        }
+
+        /// <summary>
+        /// Event handler for toggling grid mapping
+        /// </summary>
+        private void GridMapping_Changed(object sender, RoutedEventArgs e)
+        {
+            isGridMappingActive = GridMappingCheckBox.IsChecked ?? false;
+
+            StatusText = isGridMappingActive ?
+                "Grid mapping enabled - positions will be transformed" :
+                "Grid mapping disabled";
+
+            // Auto-save this setting
+            AutoSaveSettings("Grid Mapping");
+        }
+
+        /// <summary>
+        /// Event handler for configuring advanced features
+        /// </summary>
+        private void ConfigureAdvancedFeatures_Click(object sender, RoutedEventArgs e)
+        {
+            // Create a configuration dialog
+            var dialog = new Window
+            {
+                Title = "Advanced Features Configuration",
+                Width = 450,
+                Height = 300,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+
+            var panel = new StackPanel { Margin = new Thickness(15) };
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Advanced Detection and Integration Features",
+                FontWeight = FontWeights.Bold,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 0, 15)
+            });
+
+            // Color detection section
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Color Detection",
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 5, 0, 5)
+            });
+
+            var colorDetectionCheckBox = new CheckBox
+            {
+                Content = "Enable Color Detection",
+                IsChecked = enableColorDetection,
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+
+            colorDetectionCheckBox.Checked += (s, args) => enableColorDetection = true;
+            colorDetectionCheckBox.Unchecked += (s, args) => enableColorDetection = false;
+            panel.Children.Add(colorDetectionCheckBox);
+
+            var colorMappingButton = new Button
+            {
+                Content = "Configure Color Mappings",
+                Padding = new Thickness(10, 3, 10, 3),
+                Margin = new Thickness(0, 0, 0, 15),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            colorMappingButton.Click += (s, args) =>
+            {
+                dialog.Close();
+                ShowColorMappingDialog();
+            };
+            panel.Children.Add(colorMappingButton);
+
+            // Grid mapping section
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Grid Mapping",
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 5, 0, 5)
+            });
+
+            var gridMappingCheckBox = new CheckBox
+            {
+                Content = "Enable Grid Mapping",
+                IsChecked = isGridMappingActive,
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+
+            gridMappingCheckBox.Checked += (s, args) => isGridMappingActive = true;
+            gridMappingCheckBox.Unchecked += (s, args) => isGridMappingActive = false;
+            panel.Children.Add(gridMappingCheckBox);
+
+            var gridMappingButton = new Button
+            {
+                Content = "Configure Grid Mapping",
+                Padding = new Thickness(10, 3, 10, 3),
+                Margin = new Thickness(0, 0, 0, 15),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            gridMappingButton.Click += (s, args) =>
+            {
+                dialog.Close();
+                ShowGridMappingWindow();
+            };
+            panel.Children.Add(gridMappingButton);
+
+            // Debugging section
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Debugging",
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 5, 0, 5)
+            });
+
+            var debuggingButton = new Button
+            {
+                Content = "Height Profile Debugging",
+                Padding = new Thickness(10, 3, 10, 3),
+                Margin = new Thickness(0, 0, 0, 15),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            debuggingButton.Click += (s, args) =>
+            {
+                dialog.Close();
+                ToggleHeightProfileDebugging();
+            };
+            panel.Children.Add(debuggingButton);
+
+            // Close button
+            var closeButton = new Button
+            {
+                Content = "Close",
+                Padding = new Thickness(15, 5, 15, 5),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 15, 0, 0)
+            };
+            closeButton.Click += (s, args) => dialog.Close();
+            panel.Children.Add(closeButton);
+
+            dialog.Content = panel;
+            dialog.ShowDialog();
+        }
     }
 }
