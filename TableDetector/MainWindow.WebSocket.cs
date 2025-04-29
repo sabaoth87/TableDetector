@@ -9,62 +9,51 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace TableDetector
 {
+    /// <summary>
+    /// Extensions to the MainWindow class that handle WebSocket communication with FoundryVTT
+    /// </summary>
     public partial class MainWindow
     {
-        // Fields for WebSocket server
+        // WebSocket server fields
         private HttpListener httpListener;
-        private CancellationTokenSource webSocketCancellation;
         private List<WebSocket> activeConnections = new List<WebSocket>();
         private bool isWebSocketServerRunning = false;
         private int webSocketPort = 8080;
-        private System.Threading.Timer tokenUpdateTimer;
-        private bool autoSyncWithFoundry = false;
-        private DateTime lastFoundryUpdate = DateTime.MinValue;
-        private TimeSpan foundryUpdateInterval = TimeSpan.FromSeconds(0.5); // 500ms update rate
+        private CancellationTokenSource webSocketCts;
+        private System.Timers.Timer tokenUpdateTimer;
+        private bool autoSyncToFoundry = true;
+        private bool enableCompression = true;
+        private int messageSendCount = 0;
 
         /// <summary>
-        /// Starts the WebSocket server for real-time Foundry VTT integration
+        /// Start the WebSocket server
         /// </summary>
         private async Task StartWebSocketServer()
         {
             try
             {
-                if (isWebSocketServerRunning)
-                    return;
-
-                webSocketCancellation = new CancellationTokenSource();
+                webSocketCts = new CancellationTokenSource();
                 httpListener = new HttpListener();
-                httpListener.Prefixes.Add($"http://localhost:{webSocketPort}/");
-                httpListener.Prefixes.Add($"http://127.0.0.1:{webSocketPort}/");
-
-                // Add local IP addresses to allow connections from other devices on network
-                var hostName = Dns.GetHostName();
-                var hostAddresses = Dns.GetHostAddresses(hostName);
-                foreach (var address in hostAddresses)
-                {
-                    if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                    {
-                        httpListener.Prefixes.Add($"http://{address}:{webSocketPort}/");
-                    }
-                }
+                httpListener.Prefixes.Add($"http://*:{webSocketPort}/");
 
                 httpListener.Start();
                 isWebSocketServerRunning = true;
 
-                // Setup timer for regular token updates
-                tokenUpdateTimer = new System.Threading.Timer(
-                    async (state) => await SendTokenUpdatesToClients(),
-                    null,
-                    TimeSpan.FromSeconds(1),
-                    foundryUpdateInterval);
+                // Setup token update timer
+                tokenUpdateTimer = new System.Timers.Timer(100); // 10 updates per second
+                tokenUpdateTimer.Elapsed += async (s, e) => await SendTokenUpdatesToClients();
+                tokenUpdateTimer.Start();
 
-                StatusText = $"WebSocket server started on port {webSocketPort}";
+                this.Dispatcher.Invoke(() => {
+                    StatusText = $"WebSocket server started on port {webSocketPort}";
+                });
 
                 // Main connection acceptance loop
-                while (!webSocketCancellation.Token.IsCancellationRequested)
+                while (!webSocketCts.Token.IsCancellationRequested)
                 {
                     try
                     {
@@ -76,12 +65,8 @@ namespace TableDetector
                         }
                         else
                         {
-                            // Handle regular HTTP requests - could serve a simple status page
-                            string responseString = "<html><body><h1>TableDetector WebSocket Server</h1><p>Status: Running</p></body></html>";
-                            byte[] buffer = Encoding.UTF8.GetBytes(responseString);
-                            context.Response.ContentLength64 = buffer.Length;
-                            context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-                            context.Response.Close();
+                            // Handle HTTP requests with a status page
+                            ServeStatusPage(context);
                         }
                     }
                     catch (HttpListenerException)
@@ -89,10 +74,14 @@ namespace TableDetector
                         // Listener was closed
                         break;
                     }
+                    catch (OperationCanceledException)
+                    {
+                        // Operation was canceled
+                        break;
+                    }
                     catch (Exception ex)
                     {
-                        Dispatcher.Invoke(() =>
-                        {
+                        this.Dispatcher.Invoke(() => {
                             StatusText = $"WebSocket error: {ex.Message}";
                         });
                     }
@@ -100,17 +89,68 @@ namespace TableDetector
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() =>
-                {
+                this.Dispatcher.Invoke(() => {
                     StatusText = $"Failed to start WebSocket server: {ex.Message}";
-                    MessageBox.Show($"Failed to start WebSocket server: {ex.Message}",
-                        "WebSocket Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 });
             }
         }
 
         /// <summary>
-        /// Processes incoming WebSocket connection requests
+        /// Stop the WebSocket server
+        /// </summary>
+        private void StopWebSocketServer()
+        {
+            try
+            {
+                // Stop timer
+                tokenUpdateTimer?.Stop();
+                tokenUpdateTimer?.Dispose();
+                tokenUpdateTimer = null;
+
+                // Cancel operations
+                webSocketCts?.Cancel();
+                webSocketCts?.Dispose();
+                webSocketCts = null;
+
+                // Close all connections
+                List<WebSocket> connectionsToClose;
+                lock (activeConnections)
+                {
+                    connectionsToClose = new List<WebSocket>(activeConnections);
+                    activeConnections.Clear();
+                }
+
+                foreach (var socket in connectionsToClose)
+                {
+                    try
+                    {
+                        socket.CloseAsync(WebSocketCloseStatus.NormalClosure,
+                            "Server shutting down", CancellationToken.None).Wait(1000);
+                        socket.Dispose();
+                    }
+                    catch { /* Best effort cleanup */ }
+                }
+
+                // Stop listener
+                httpListener?.Close();
+                httpListener = null;
+
+                isWebSocketServerRunning = false;
+
+                this.Dispatcher.Invoke(() => {
+                    StatusText = "WebSocket server stopped";
+                });
+            }
+            catch (Exception ex)
+            {
+                this.Dispatcher.Invoke(() => {
+                    StatusText = $"Error stopping WebSocket server: {ex.Message}";
+                });
+            }
+        }
+
+        /// <summary>
+        /// Process an incoming WebSocket connection request
         /// </summary>
         private async void ProcessWebSocketRequest(HttpListenerContext context)
         {
@@ -118,6 +158,7 @@ namespace TableDetector
 
             try
             {
+                // Accept WebSocket connection
                 webSocketContext = await context.AcceptWebSocketAsync(subProtocol: null);
                 var webSocket = webSocketContext.WebSocket;
 
@@ -127,47 +168,73 @@ namespace TableDetector
                     activeConnections.Add(webSocket);
                 }
 
-                Dispatcher.Invoke(() =>
-                {
-                    StatusText = $"Foundry VTT client connected. Total connections: {activeConnections.Count}";
+                // Update UI and log
+                this.Dispatcher.Invoke(() => {
+                    StatusText = $"FoundryVTT client connected. Total connections: {activeConnections.Count}";
                 });
 
-                // Send initial token data
-                await SendTokenDataToClient(webSocket);
+                // Send initial full token data
+                await SendInitialDataToClient(webSocket);
 
                 // Keep connection alive and handle incoming messages
                 var buffer = new byte[4096];
-                var receiveResult = await webSocket.ReceiveAsync(
-                    new ArraySegment<byte>(buffer), webSocketCancellation.Token);
+                WebSocketReceiveResult receiveResult;
 
-                while (!receiveResult.CloseStatus.HasValue)
+                // Receive messages until connection closes
+                do
                 {
-                    // Process any commands from Foundry
-                    string message = Encoding.UTF8.GetString(buffer, 0, receiveResult.Count);
-                    ProcessIncomingMessage(message);
+                    try
+                    {
+                        receiveResult = await webSocket.ReceiveAsync(
+                            new ArraySegment<byte>(buffer), webSocketCts.Token);
 
-                    // Continue receiving
-                    receiveResult = await webSocket.ReceiveAsync(
-                        new ArraySegment<byte>(buffer), webSocketCancellation.Token);
+                        if (!receiveResult.CloseStatus.HasValue)
+                        {
+                            // Process message
+                            string message = Encoding.UTF8.GetString(buffer, 0, receiveResult.Count);
+                            ProcessIncomingMessage(message, webSocket);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Operation was canceled
+                        break;
+                    }
+                    catch (WebSocketException)
+                    {
+                        // WebSocket error
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error receiving message: {ex.Message}");
+                        break;
+                    }
                 }
+                while (webSocket.State == WebSocketState.Open && !webSocketCts.Token.IsCancellationRequested);
 
                 // Close connection gracefully
-                await webSocket.CloseAsync(
-                    receiveResult.CloseStatus.Value,
-                    receiveResult.CloseStatusDescription,
-                    CancellationToken.None);
+                try
+                {
+                    if (webSocket.State == WebSocketState.Open)
+                    {
+                        await webSocket.CloseAsync(
+                            WebSocketCloseStatus.NormalClosure,
+                            "Connection closed by server",
+                            CancellationToken.None);
+                    }
+                }
+                catch { /* Ignore errors during close */ }
             }
             catch (Exception ex)
             {
-                // Handle error
-                Dispatcher.Invoke(() =>
-                {
+                this.Dispatcher.Invoke(() => {
                     StatusText = $"WebSocket connection error: {ex.Message}";
                 });
             }
             finally
             {
-                // Remove from active connections
+                // Clean up connection
                 if (webSocketContext != null)
                 {
                     var webSocket = webSocketContext.WebSocket;
@@ -177,135 +244,72 @@ namespace TableDetector
                         activeConnections.Remove(webSocket);
                     }
 
-                    Dispatcher.Invoke(() =>
-                    {
-                        StatusText = $"Foundry VTT client disconnected. Remaining connections: {activeConnections.Count}";
+                    this.Dispatcher.Invoke(() => {
+                        StatusText = $"FoundryVTT client disconnected. Remaining connections: {activeConnections.Count}";
                     });
 
-                    // Dispose if still open
-                    if (webSocket.State == WebSocketState.Open)
-                    {
-                        webSocket.Dispose();
-                    }
+                    webSocket.Dispose();
                 }
             }
         }
 
         /// <summary>
-        /// Sends token data to a specific client
+        /// Send initial full token data to a new client
         /// </summary>
-        private async Task SendTokenDataToClient(WebSocket webSocket)
+        private async Task SendInitialDataToClient(WebSocket webSocket)
         {
-            if (webSocket.State != WebSocketState.Open)
-                return;
-
             try
             {
-                var tokenData = CreateTokenUpdateData();
-                byte[] data = Encoding.UTF8.GetBytes(tokenData);
+                if (webSocket.State != WebSocketState.Open)
+                    return;
+
+                // Prepare initial data packet with everything the client needs
+                var initialData = new
+                {
+                    type = "initialData",
+                    timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                    status = hasValidROI && hasValidTableDepth ? "ready" : "notReady",
+                    tableDepth = tableDepth,
+                    hasValidROI = hasValidROI,
+                    hasValidTableDepth = hasValidTableDepth,
+                    roi = new
+                    {
+                        x = (int)detectedTableROI.X,
+                        y = (int)detectedTableROI.Y,
+                        width = (int)detectedTableROI.Width,
+                        height = (int)detectedTableROI.Height
+                    },
+                    settings = new
+                    {
+                        isAngledView = isAngledView,
+                        tokenDetectionThreshold = tokenDetectionThreshold,
+                        miniDetectionSensitivity = miniDetectionSensitivity,
+                        maxMiniatureHeight = maxMiniatureHeight,
+                        tokenUpdateInterval = tokenUpdateInterval.TotalMilliseconds
+                    },
+                    tokens = detectedTokens.Select(t => CreateTokenObjectForJson(t)).ToArray()
+                };
+
+                string json = JsonSerializer.Serialize(initialData);
+
+                // Send data
+                byte[] messageBytes = Encoding.UTF8.GetBytes(json);
                 await webSocket.SendAsync(
-                    new ArraySegment<byte>(data),
+                    new ArraySegment<byte>(messageBytes),
                     WebSocketMessageType.Text,
                     true,
-                    CancellationToken.None);
+                    webSocketCts.Token);
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() =>
-                {
-                    StatusText = $"Error sending token data: {ex.Message}";
-                });
+                Console.WriteLine($"Error sending initial data: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Sends token updates to all connected clients
+        /// Process incoming messages from clients
         /// </summary>
-        private async Task SendTokenUpdatesToClients()
-        {
-            if (!isWebSocketServerRunning || !autoSyncWithFoundry)
-                return;
-
-            // Only send updates at the specified interval
-            if (DateTime.Now - lastFoundryUpdate < foundryUpdateInterval)
-                return;
-
-            lastFoundryUpdate = DateTime.Now;
-
-            var tokenData = CreateTokenUpdateData();
-            byte[] data = Encoding.UTF8.GetBytes(tokenData);
-
-            // Copy the list of connections to avoid modification during iteration
-            WebSocket[] connections;
-            lock (activeConnections)
-            {
-                connections = activeConnections.ToArray();
-            }
-
-            foreach (var webSocket in connections)
-            {
-                if (webSocket.State != WebSocketState.Open)
-                    continue;
-
-                try
-                {
-                    await webSocket.SendAsync(
-                        new ArraySegment<byte>(data),
-                        WebSocketMessageType.Text,
-                        true,
-                        CancellationToken.None);
-                }
-                catch (Exception)
-                {
-                    // Handle connection errors - will be cleaned up on next receive
-                }
-            }
-        }
-
-        /// <summary>
-        /// Convert token type color to hex for Foundry VTT
-        /// </summary>
-        private string GetTokenHexColor(TokenType type)
-        {
-            System.Windows.Media.Color color = GetTokenTypeColor(type);
-            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
-        }
-
-        /// <summary>
-        /// Improved helper method to determine appropriate size for Foundry
-        /// </summary>
-        private double GetSizeForFoundry(TTRPGToken token)
-        {
-            switch (token.Type)
-            {
-                case TokenType.SmallToken:
-                    return 1.0;
-                case TokenType.MediumToken:
-                    return 1.0;
-                case TokenType.LargeToken:
-                    return 2.0;
-                case TokenType.Miniature:
-                    // More sophisticated size calculation for miniatures based on actual dimensions
-                    double diameter = token.DiameterMeters * 39.37; // Convert to inches
-
-                    // Standard D&D sizes: Tiny (0.5), Small (1), Medium (1), Large (2), Huge (3), Gargantuan (4)
-                    if (diameter < 0.75) return 0.5; // Tiny
-                    if (diameter < 1.5) return 1.0; // Small/Medium
-                    if (diameter < 2.5) return 2.0; // Large
-                    if (diameter < 3.5) return 3.0; // Huge
-                    return 4.0; // Gargantuan
-
-                case TokenType.Dice:
-                    return 0.5; // Dice are usually small tokens
-                default:
-                    return 1.0;
-            }
-        }
-
-        /// <summary>
-        /// Processes incoming messages from Foundry VTT clients with enhanced functionality
-        /// </summary>
-        private void ProcessIncomingMessage(string message)
+        private void ProcessIncomingMessage(string message, WebSocket senderSocket)
         {
             try
             {
@@ -313,88 +317,46 @@ namespace TableDetector
                 using (JsonDocument doc = JsonDocument.Parse(message))
                 {
                     var root = doc.RootElement;
-                    if (root.TryGetProperty("command", out var command))
-                    {
-                        string cmd = command.GetString();
 
-                        // Handle different commands
-                        switch (cmd)
+                    // Check for command property
+                    if (root.TryGetProperty("command", out var cmdElement))
+                    {
+                        string command = cmdElement.GetString();
+
+                        switch (command)
                         {
-                            case "requestTokens":
-                                // Client is requesting a fresh token update
-                                SendTokenUpdatesToClients().Wait();
+                            case "requestTokenUpdate":
+                                // Client is requesting fresh token data
+                                SendTokenUpdatesToClient(senderSocket).Wait();
                                 break;
 
                             case "updateSettings":
-                                // Client is updating settings
-                                if (root.TryGetProperty("autoSync", out var autoSync))
-                                {
-                                    autoSyncWithFoundry = autoSync.GetBoolean();
-                                }
-
-                                // Add ability to adjust detection settings from Foundry
-                                if (root.TryGetProperty("detectionSensitivity", out var sensitivity))
-                                {
-                                    miniDetectionSensitivity = Math.Max(3, Math.Min(30, sensitivity.GetInt32()));
-                                }
-
-                                if (root.TryGetProperty("miniatureHeight", out var height))
-                                {
-                                    maxMiniatureHeight = Math.Max(30, Math.Min(200, height.GetInt32()));
-                                }
+                                HandleSettingsUpdateRequest(root);
                                 break;
 
-                            case "assignLabel":
-                                // Client is assigning a label to a token
-                                if (root.TryGetProperty("tokenId", out var tokenId) &&
-                                    root.TryGetProperty("label", out var label))
-                                {
-                                    var tokenIdStr = tokenId.GetString();
-                                    var labelStr = label.GetString();
-
-                                    // Find and update token
-                                    var token = detectedTokens.FirstOrDefault(t => t.Id.ToString() == tokenIdStr);
-                                    if (token != null)
-                                    {
-                                        token.Label = labelStr;
-                                        Dispatcher.Invoke(() =>
-                                        {
-                                            UpdateTokenOverlay();
-                                            StatusText = $"Updated token label: {labelStr}";
-                                        });
-                                    }
-                                }
+                            case "updateToken":
+                                HandleTokenUpdateRequest(root);
                                 break;
 
-                            case "requestStatus":
-                                // Client is requesting system status
-                                SendSystemStatusToClients().Wait();
+                            case "requestRoi":
+                                // Client is requesting to enter ROI selection mode
+                                this.Dispatcher.Invoke(() => {
+                                    ToggleCalibrationMode();
+                                });
                                 break;
 
-                            case "setTokenType":
-                                // Client is setting a token type
-                                if (root.TryGetProperty("tokenId", out var typeTokenId) &&
-                                    root.TryGetProperty("type", out var typeValue))
-                                {
-                                    var tokenIdStr = typeTokenId.GetString();
-                                    var typeStr = typeValue.GetString();
+                            case "calibrate":
+                                // Client is requesting system calibration
+                                HandleCalibrationRequest(root);
+                                break;
 
-                                    // Parse the token type
-                                    if (Enum.TryParse<TokenType>(typeStr, true, out TokenType parsedType))
-                                    {
-                                        // Find and update token
-                                        var token = detectedTokens.FirstOrDefault(t => t.Id.ToString() == tokenIdStr);
-                                        if (token != null)
-                                        {
-                                            token.Type = parsedType;
-                                            Dispatcher.Invoke(() =>
-                                            {
-                                                UpdateTokenOverlay();
-                                                StatusText = $"Updated token type: {typeStr}";
-                                            });
-                                        }
-                                    }
-                                }
+                            case "ping":
+                                // Send pong response
+                                SendPongResponse(senderSocket).Wait();
+                                break;
+
+                            default:
+                                Console.WriteLine($"Unknown command: {command}");
                                 break;
                         }
                     }
@@ -402,544 +364,569 @@ namespace TableDetector
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() =>
-                {
-                    StatusText = $"Error processing message: {ex.Message}";
-                });
+                Console.WriteLine($"Error processing message: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Sends system status information to all connected clients
+        /// Handle settings update request from client
         /// </summary>
-        private async Task SendSystemStatusToClients()
+        private void HandleSettingsUpdateRequest(JsonElement requestData)
         {
-            var statusData = new
+            try
             {
-                type = "systemStatus",
-                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                isReady = IsReadyForTokenDetection(),
-                hasValidROI = hasValidROI,
-                hasValidTableDepth = hasValidTableDepth,
-                tableDepth = tableDepth,
-                tokenCount = detectedTokens.Count,
-                roi = new
+                bool settingsChanged = false;
+
+                // Check each setting that can be updated
+                if (requestData.TryGetProperty("autoSync", out var autoSyncElement))
                 {
-                    x = (int)detectedTableROI.X,
-                    y = (int)detectedTableROI.Y,
-                    width = (int)detectedTableROI.Width,
-                    height = (int)detectedTableROI.Height
-                },
-                detection = new
-                {
-                    minTokenHeight = MIN_TOKEN_HEIGHT,
-                    maxMiniatureHeight = maxMiniatureHeight,
-                    sensitivity = miniDetectionSensitivity,
-                    updateInterval = tokenUpdateInterval.TotalMilliseconds
+                    autoSyncToFoundry = autoSyncElement.GetBoolean();
+                    settingsChanged = true;
                 }
-            };
 
-            string json = JsonSerializer.Serialize(statusData);
-            byte[] data = Encoding.UTF8.GetBytes(json);
+                if (requestData.TryGetProperty("tokenThreshold", out var thresholdElement))
+                {
+                    tokenDetectionThreshold = Math.Max(3, Math.Min(50, thresholdElement.GetInt32()));
+                    settingsChanged = true;
+                }
 
-            // Send to all connected clients
+                if (requestData.TryGetProperty("miniatureSensitivity", out var sensitivityElement))
+                {
+                    miniDetectionSensitivity = Math.Max(3, Math.Min(30, sensitivityElement.GetInt32()));
+                    settingsChanged = true;
+                }
+
+                if (requestData.TryGetProperty("angledView", out var angledViewElement))
+                {
+                    isAngledView = angledViewElement.GetBoolean();
+                    HandleCameraAngleChange();
+                    settingsChanged = true;
+                }
+
+                if (requestData.TryGetProperty("updateInterval", out var intervalElement))
+                {
+                    double intervalMs = Math.Max(50, Math.Min(1000, intervalElement.GetDouble()));
+                    tokenUpdateInterval = TimeSpan.FromMilliseconds(intervalMs);
+                    settingsChanged = true;
+
+                    // Update timer interval if running
+                    if (tokenUpdateTimer != null)
+                    {
+                        tokenUpdateTimer.Interval = intervalMs;
+                    }
+                }
+
+                // Save settings if changed
+                if (settingsChanged)
+                {
+                    this.Dispatcher.Invoke(() => {
+                        AutoSaveSettings("Remote Settings Update");
+                        StatusText = "Settings updated from Foundry VTT";
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error updating settings: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle token update request from client
+        /// </summary>
+        private void HandleTokenUpdateRequest(JsonElement requestData)
+        {
+            try
+            {
+                // Extract token ID and updated properties
+                if (requestData.TryGetProperty("tokenId", out var tokenIdElement))
+                {
+                    string tokenId = tokenIdElement.GetString();
+
+                    // Find matching token
+                    var token = detectedTokens.FirstOrDefault(t => t.Id.ToString() == tokenId);
+                    if (token != null)
+                    {
+                        bool tokenUpdated = false;
+
+                        // Update token label
+                        if (requestData.TryGetProperty("label", out var labelElement))
+                        {
+                            token.Label = labelElement.GetString();
+                            tokenUpdated = true;
+                        }
+
+                        // Update token type
+                        if (requestData.TryGetProperty("type", out var typeElement))
+                        {
+                            string typeString = typeElement.GetString();
+                            if (Enum.TryParse<TokenType>(typeString, true, out TokenType type))
+                            {
+                                token.Type = type;
+                                tokenUpdated = true;
+                            }
+                        }
+
+                        // Update token color
+                        if (requestData.TryGetProperty("color", out var colorElement))
+                        {
+                            string colorHex = colorElement.GetString();
+                            if (colorHex.StartsWith("#") && colorHex.Length == 7)
+                            {
+                                try
+                                {
+                                    var color = System.Windows.Media.Color.FromRgb(
+                                        Convert.ToByte(colorHex.Substring(1, 2), 16),
+                                        Convert.ToByte(colorHex.Substring(3, 2), 16),
+                                        Convert.ToByte(colorHex.Substring(5, 2), 16));
+
+                                    token.Color = color;
+                                    tokenUpdated = true;
+                                }
+                                catch { /* Invalid color format */ }
+                            }
+                        }
+
+                        // Update UI if token was updated
+                        if (tokenUpdated)
+                        {
+                            this.Dispatcher.Invoke(() => {
+                                UpdateTokenOverlay();
+                                StatusText = $"Token {token.Id} updated from Foundry VTT";
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error updating token: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle calibration request from client
+        /// </summary>
+        private void HandleCalibrationRequest(JsonElement requestData)
+        {
+            try
+            {
+                string calibrationType = "full";
+
+                // Get calibration type
+                if (requestData.TryGetProperty("type", out var typeElement))
+                {
+                    calibrationType = typeElement.GetString();
+                }
+
+                switch (calibrationType)
+                {
+                    case "tableDepth":
+                        // Force table depth detection
+                        tableDepthLocked = false;
+                        depthHistory.Clear();
+
+                        this.Dispatcher.Invoke(() => {
+                            FindLargestSurface_Click(null, null);
+                        });
+                        break;
+
+                    case "roi":
+                        // Enter ROI selection mode
+                        this.Dispatcher.Invoke(() => {
+                            ToggleCalibrationMode();
+                        });
+                        break;
+
+                    case "full":
+                    default:
+                        // Full system calibration
+                        tableDepthLocked = false;
+                        depthHistory.Clear();
+
+                        this.Dispatcher.Invoke(() => {
+                            FindLargestSurface_Click(null, null);
+
+                            // Wait a moment then enter ROI selection
+                            System.Threading.Tasks.Task.Delay(2000).ContinueWith(_ => {
+                                this.Dispatcher.Invoke(() => {
+                                    ToggleCalibrationMode();
+                                });
+                            });
+                        });
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error handling calibration request: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Send ping response
+        /// </summary>
+        private async Task SendPongResponse(WebSocket socket)
+        {
+            try
+            {
+                if (socket.State != WebSocketState.Open)
+                    return;
+
+                var pongResponse = new
+                {
+                    type = "pong",
+                    timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
+                };
+
+                string json = JsonSerializer.Serialize(pongResponse);
+                byte[] messageBytes = Encoding.UTF8.GetBytes(json);
+
+                await socket.SendAsync(
+                    new ArraySegment<byte>(messageBytes),
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error sending pong: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Send token updates to all connected clients
+        /// </summary>
+        private async Task SendTokenUpdatesToClients()
+        {
+            if (!isWebSocketServerRunning || !autoSyncToFoundry || activeConnections.Count == 0)
+                return;
+
+            // Get snapshot of current connections
             WebSocket[] connections;
             lock (activeConnections)
             {
                 connections = activeConnections.ToArray();
             }
 
-            foreach (var webSocket in connections)
-            {
-                if (webSocket.State != WebSocketState.Open)
-                    continue;
-
-                try
-                {
-                    await webSocket.SendAsync(
-                        new ArraySegment<byte>(data),
-                        WebSocketMessageType.Text,
-                        true,
-                        CancellationToken.None);
-                }
-                catch (Exception)
-                {
-                    // Handle connection errors - will be cleaned up on next receive
-                }
-            }
-        }
-
-        /// <summary>
-        /// Creates JSON token update data for Foundry VTT
-        /// </summary>
-        private string CreateTokenUpdateData()
-        {
-            // Use the color-enhanced version if color detection is enabled
-            if (enableColorDetection)
-            {
-                return CreateTokenUpdateDataWithColor();
-            }
-
-            // If grid mapping is active, use the mapped positions
-            if (isGridMappingActive)
-            {
-                return CreateTokenUpdateDataWithMapping();
-            }
-
-            // Otherwise, use the original format
-            // Only send updates if we have a valid detection setup
-            if (!IsReadyForTokenDetection() || detectedTokens.Count == 0)
-            {
-                // Create a status-only update when no tokens are available
-                var statusUpdate = new
-                {
-                    type = "statusUpdate",
-                    timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                    status = hasValidROI && hasValidTableDepth ? "ready" : "notReady",
-                    message = !hasValidROI ? "Define ROI on depth image" :
-                             !hasValidTableDepth ? "Table depth not detected" : "Ready",
-                    tokenCount = 0
-                };
-
-                return JsonSerializer.Serialize(statusUpdate);
-            }
-
-            // Create token data in Foundry VTT compatible format with improved metadata
-            var tokenUpdate = new
-            {
-                type = "tokenUpdate",
-                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                tableDepth = tableDepth,
-                status = "active",
-                tokens = detectedTokens.Select(t => new
-                {
-                    id = t.Id.ToString(),
-                    name = !string.IsNullOrEmpty(t.Label) ? t.Label : GetTokenTypeString(t.Type),
-                    // Convert to Foundry grid units - assuming 1 grid = 1 inch and using meters as our base unit
-                    x = t.RealWorldPosition.X * 39.37, // Convert meters to inches
-                    y = t.RealWorldPosition.Y * 39.37, // Convert meters to inches
-                    elevation = 0,
-                    height = GetSizeForFoundry(t),
-                    width = GetSizeForFoundry(t),
-                    type = t.Type.ToString(),
-                    // Additional metadata
-                    heightMm = t.HeightMm,
-                    diameterMm = t.DiameterMeters * 1000, // Convert meters to mm
-                                                          // Include properties for visualization in Foundry
-                    isHumanoid = t.Type == TokenType.Miniature,
-                    tokenColor = GetTokenHexColor(t.Type)
-                }).ToArray()
-            };
-
-            return JsonSerializer.Serialize(tokenUpdate);
-        }
-
-        // If Mapping is enabled
-        private string CreateTokenUpdateDataWithMapping()
-        {
-            // Only send updates if we have a valid detection setup
-            if (!IsReadyForTokenDetection() || detectedTokens.Count == 0)
-            {
-                // Create a status-only update when no tokens are available
-                var statusUpdate = new
-                {
-                    type = "statusUpdate",
-                    timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                    status = hasValidROI && hasValidTableDepth ? "ready" : "notReady",
-                    message = !hasValidROI ? "Define ROI on depth image" :
-                             !hasValidTableDepth ? "Table depth not detected" : "Ready",
-                    tokenCount = 0,
-                    gridMappingActive = isGridMappingActive
-                };
-
-                return JsonSerializer.Serialize(statusUpdate);
-            }
-
-            // Create token data with grid mapping included
-            var tokenUpdate = new
-            {
-                type = "tokenUpdate",
-                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                tableDepth = tableDepth,
-                status = "active",
-                gridMappingActive = isGridMappingActive,
-                gridSettings = new
-                {
-                    physicalGridSize = currentGridMapping.PhysicalGridSize,
-                    virtualGridSize = currentGridMapping.VirtualGridSize,
-                    rotation = currentGridMapping.PhysicalRotation,
-                    scale = currentGridMapping.VirtualScale
-                },
-                tokens = detectedTokens.Select(t => new
-                {
-                    id = t.Id.ToString(),
-                    name = !string.IsNullOrEmpty(t.Label) ? t.Label : GetTokenTypeString(t.Type),
-                    // Use the mapped position if available, otherwise use the standard position
-                    x = isGridMappingActive ? t.FoundryPosition.X : (t.RealWorldPosition.X * 39.37),
-                    y = isGridMappingActive ? t.FoundryPosition.Y : (t.RealWorldPosition.Y * 39.37),
-                    // Include the original position for reference
-                    originalX = t.RealWorldPosition.X * 39.37,
-                    originalY = t.RealWorldPosition.Y * 39.37,
-                    elevation = 0,
-                    height = GetSizeForFoundry(t),
-                    width = GetSizeForFoundry(t),
-                    type = t.Type.ToString(),
-                    // Additional metadata
-                    heightMm = t.HeightMm,
-                    diameterMm = t.DiameterMeters * 1000, // Convert meters to mm
-                                                          // Include properties for visualization in Foundry
-                    isHumanoid = t.Type == TokenType.Miniature,
-                    tokenColor = GetTokenHexColor(t.Type)
-                }).ToArray()
-            };
-
-            return JsonSerializer.Serialize(tokenUpdate);
-        }
-
-        /// <summary>
-        /// Stops the WebSocket server
-        /// </summary>
-        private void StopWebSocketServer()
-        {
-            if (!isWebSocketServerRunning)
+            if (connections.Length == 0)
                 return;
 
             try
             {
-                // Cancel and dispose timer
-                tokenUpdateTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-                tokenUpdateTimer?.Dispose();
-                tokenUpdateTimer = null;
+                // Prepare token update data
+                string json = CreateTokenUpdateJson();
+                byte[] messageBytes = Encoding.UTF8.GetBytes(json);
 
-                // Signal cancellation to all tasks
-                webSocketCancellation?.Cancel();
-
-                // Close all active WebSocket connections
-                WebSocket[] connections;
-                lock (activeConnections)
+                // Send to all connected clients
+                List<Task> sendTasks = new List<Task>();
+                foreach (var socket in connections)
                 {
-                    connections = activeConnections.ToArray();
-                    activeConnections.Clear();
-                }
-
-                foreach (var webSocket in connections)
-                {
-                    try
+                    if (socket.State == WebSocketState.Open)
                     {
-                        if (webSocket.State == WebSocketState.Open)
-                        {
-                            // Try to close gracefully
-                            webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure,
-                                "Server shutting down", CancellationToken.None).Wait(1000);
-                        }
-                        webSocket.Dispose();
-                    }
-                    catch
-                    {
-                        // Best effort cleanup
+                        sendTasks.Add(socket.SendAsync(
+                            new ArraySegment<byte>(messageBytes),
+                            WebSocketMessageType.Text,
+                            true,
+                            CancellationToken.None));
                     }
                 }
 
-                // Stop the HTTP listener
-                httpListener?.Close();
-                httpListener = null;
-                isWebSocketServerRunning = false;
-
-                StatusText = "WebSocket server stopped";
+                // Wait for all sends to complete
+                if (sendTasks.Count > 0)
+                {
+                    await Task.WhenAll(sendTasks);
+                    messageSendCount++;
+                }
             }
             catch (Exception ex)
             {
-                StatusText = $"Error stopping WebSocket server: {ex.Message}";
+                Console.WriteLine($"Error sending token updates: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Toggle automatic synchronization with Foundry VTT
+        /// Send token update to a specific client
         /// </summary>
-        private void ToggleFoundrySync(bool enable)
+        private async Task SendTokenUpdatesToClient(WebSocket socket)
         {
-            autoSyncWithFoundry = enable;
+            if (socket.State != WebSocketState.Open)
+                return;
 
-            if (enable)
+            try
             {
-                StatusText = "Auto-sync with Foundry VTT enabled";
-                // Ensure server is running
-                if (!isWebSocketServerRunning)
-                {
-                    Task.Run(() => StartWebSocketServer());
-                }
+                // Prepare token update data
+                string json = CreateTokenUpdateJson();
+                byte[] messageBytes = Encoding.UTF8.GetBytes(json);
+
+                // Send to the client
+                await socket.SendAsync(
+                    new ArraySegment<byte>(messageBytes),
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error sending token update to client: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Create JSON string with token update data
+        /// </summary>
+        private string CreateTokenUpdateJson()
+        {
+            // Create token update object
+            var tokenUpdate = new
+            {
+                type = "tokenUpdate",
+                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                sequence = messageSendCount,
+                tableDepth = tableDepth,
+                status = hasValidROI && hasValidTableDepth ? "ready" : "notReady",
+                tokens = detectedTokens.Select(t => CreateTokenObjectForJson(t)).ToArray()
+            };
+
+            return JsonSerializer.Serialize(tokenUpdate);
+        }
+
+        /// <summary>
+        /// Create a JSON-friendly token object
+        /// </summary>
+        private object CreateTokenObjectForJson(TTRPGToken token)
+        {
+            // Convert to a format appropriate for JSON serialization
+            return new
+            {
+                id = token.Id.ToString(),
+                name = !string.IsNullOrEmpty(token.Label) ? token.Label : GetTokenTypeString(token.Type),
+                // Convert to Foundry grid units - assuming 1 grid = 1 inch and using meters as our base unit
+                x = token.RealWorldPosition.X * 39.37, // Convert meters to inches
+                y = token.RealWorldPosition.Y * 39.37, // Convert meters to inches
+                z = token.RealWorldPosition.Z * 39.37, // Convert meters to inches
+                elevation = 0,
+                size = GetSizeForFoundry(token),
+                type = token.Type.ToString(),
+                // Additional metadata
+                heightMm = token.HeightMm,
+                diameterMm = token.DiameterMeters * 1000, // Convert meters to mm
+                depthMm = token.Depth,
+                // Include properties for visualization in Foundry
+                isHumanoid = token.Type == TokenType.Miniature,
+                colorHex = GetTokenHexColor(token),
+                // Include actor information from color detection if available
+                actorCategory = enableColorDetection ? token.ActorCategory : "Unknown",
+                actorType = enableColorDetection ? token.ActorType : "unknown",
+                isHostile = enableColorDetection ? token.IsHostile : false,
+                // Include grid mapping information if available
+                hasGridPosition = isGridMappingActive && token.FoundryPosition != new Point(0, 0),
+                gridX = isGridMappingActive ? token.FoundryPosition.X : 0,
+                gridY = isGridMappingActive ? token.FoundryPosition.Y : 0
+            };
+        }
+
+        /// <summary>
+        /// Convert token color to hex string
+        /// </summary>
+        private string GetTokenHexColor(TTRPGToken token)
+        {
+            if (enableColorDetection && token.Color != Colors.Gray)
+            {
+                // Use detected color
+                return $"#{token.Color.R:X2}{token.Color.G:X2}{token.Color.B:X2}";
             }
             else
             {
-                StatusText = "Auto-sync with Foundry VTT disabled";
+                // Use type-based color
+                var typeColor = GetTokenTypeColor(token.Type);
+                return $"#{typeColor.R:X2}{typeColor.G:X2}{typeColor.B:X2}";
             }
         }
 
         /// <summary>
-        /// Add Foundry VTT integration UI to the main window
+        /// Determine appropriate size for Foundry VTT
         /// </summary>
-        private void AddFoundryVTTIntegrationUI()
+        private double GetSizeForFoundry(TTRPGToken token)
         {
-            var window = new Window
+            // Calculate size based on Foundry's grid units (1 = 1 grid square)
+            switch (token.Type)
             {
-                Title = "Foundry VTT Integration",
-                Width = 500,
-                Height = 400,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this
-            };
+                case TokenType.SmallToken:
+                    return 1.0;
 
-            var panel = new StackPanel { Margin = new Thickness(15) };
+                case TokenType.MediumToken:
+                    return token.DiameterMeters >= 0.05 ? 1.0 : 0.5; // 5cm threshold
 
-            // Title
-            panel.Children.Add(new TextBlock
-            {
-                Text = "Foundry VTT Integration Setup",
-                FontSize = 18,
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 0, 0, 15)
-            });
+                case TokenType.LargeToken:
+                    return token.DiameterMeters >= 0.075 ? 2.0 : 1.0; // 7.5cm threshold
 
-            // Connection settings
-            panel.Children.Add(new TextBlock
-            {
-                Text = "WebSocket Server Settings",
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 10, 0, 5)
-            });
+                case TokenType.Miniature:
+                    // Calculate size based on base diameter
+                    double inchDiameter = token.DiameterMeters * 39.37; // Convert to inches
 
-            // Port selection
-            var portPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 5, 0, 15) };
-            portPanel.Children.Add(new TextBlock { Text = "Server Port:", VerticalAlignment = VerticalAlignment.Center });
-            var portInput = new TextBox
-            {
-                Text = webSocketPort.ToString(),
-                Width = 80,
-                Margin = new Thickness(10, 0, 0, 0)
-            };
-            portPanel.Children.Add(portInput);
-            panel.Children.Add(portPanel);
+                    // D&D size categories
+                    if (inchDiameter < 0.75) return 0.5; // Tiny (less than 0.75")
+                    if (inchDiameter < 1.5) return 1.0; // Small/Medium (0.75"-1.5")
+                    if (inchDiameter < 3.0) return 2.0; // Large (1.5"-3")
+                    if (inchDiameter < 4.0) return 3.0; // Huge (3"-4")
+                    return 4.0; // Gargantuan (4"+)
 
-            // Server status and controls
-            var serverStatusPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 5, 0, 15) };
-            var serverStatusText = new TextBlock
-            {
-                Text = isWebSocketServerRunning ? "Server Status: Running" : "Server Status: Stopped",
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            serverStatusPanel.Children.Add(serverStatusText);
+                case TokenType.Dice:
+                    return 0.5; // Dice are typically small
 
-            var startServerButton = new Button
-            {
-                Content = isWebSocketServerRunning ? "Restart Server" : "Start Server",
-                Padding = new Thickness(10, 5, 10, 5),
-                Margin = new Thickness(15, 0, 0, 0)
-            };
-            startServerButton.Click += async (s, e) =>
-            {
-            // Update port if changed
-            if (int.TryParse(portInput.Text, out int newPort) && newPort >= 1024 && newPort <= 65535)
-                {
-                    webSocketPort = newPort;
-                }
-
-            // Stop existing server if running
-            if (isWebSocketServerRunning)
-                {
-                    StopWebSocketServer();
-                }
-
-            // Start new server
-            await StartWebSocketServer();
-                serverStatusText.Text = "Server Status: Running";
-                startServerButton.Content = "Restart Server";
-            };
-            serverStatusPanel.Children.Add(startServerButton);
-
-            var stopServerButton = new Button
-            {
-                Content = "Stop Server",
-                Padding = new Thickness(10, 5, 10, 5),
-                Margin = new Thickness(10, 0, 0, 0),
-                IsEnabled = isWebSocketServerRunning
-            };
-            stopServerButton.Click += (s, e) =>
-            {
-                StopWebSocketServer();
-                serverStatusText.Text = "Server Status: Stopped";
-                startServerButton.Content = "Start Server";
-                stopServerButton.IsEnabled = false;
-            };
-            serverStatusPanel.Children.Add(stopServerButton);
-
-            panel.Children.Add(serverStatusPanel);
-
-            // Synchronization settings
-            panel.Children.Add(new TextBlock
-            {
-                Text = "Synchronization Settings",
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 10, 0, 5)
-            });
-
-            var autoSyncCheckbox = new CheckBox
-            {
-                Content = "Automatically sync tokens with Foundry VTT",
-                IsChecked = autoSyncWithFoundry,
-                Margin = new Thickness(0, 5, 0, 5)
-            };
-            autoSyncCheckbox.Checked += (s, e) => ToggleFoundrySync(true);
-            autoSyncCheckbox.Unchecked += (s, e) => ToggleFoundrySync(false);
-            panel.Children.Add(autoSyncCheckbox);
-
-            // Update interval
-            var updateIntervalPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 5, 0, 5) };
-            updateIntervalPanel.Children.Add(new TextBlock
-            {
-                Text = "Update Interval (ms):",
-                VerticalAlignment = VerticalAlignment.Center
-            });
-
-            var updateIntervalInput = new TextBox
-            {
-                Text = foundryUpdateInterval.TotalMilliseconds.ToString(),
-                Width = 80,
-                Margin = new Thickness(10, 0, 0, 0)
-            };
-            updateIntervalPanel.Children.Add(updateIntervalInput);
-
-            var applyIntervalButton = new Button
-            {
-                Content = "Apply",
-                Padding = new Thickness(5, 2, 5, 2),
-                Margin = new Thickness(10, 0, 0, 0)
-            };
-            applyIntervalButton.Click += (s, e) =>
-            {
-                if (double.TryParse(updateIntervalInput.Text, out double ms) && ms >= 100)
-                {
-                    foundryUpdateInterval = TimeSpan.FromMilliseconds(ms);
-                    StatusText = $"Update interval set to {ms}ms";
-
-                // Update timer interval if running
-                if (tokenUpdateTimer != null)
-                    {
-                        tokenUpdateTimer.Change(TimeSpan.FromSeconds(1), foundryUpdateInterval);
-                    }
-                }
-            };
-            updateIntervalPanel.Children.Add(applyIntervalButton);
-            panel.Children.Add(updateIntervalPanel);
-
-            // Foundry module installation instructions
-            panel.Children.Add(new TextBlock
-            {
-                Text = "Foundry VTT Module",
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 15, 0, 5)
-            });
-
-            panel.Children.Add(new TextBlock
-            {
-                Text = "To use this integration, install the TableDetector module in Foundry VTT. The module connects to this application to synchronize physical miniatures with digital tokens.",
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 5, 0, 5)
-            });
-
-            var connectionInfoPanel = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
-            connectionInfoPanel.Children.Add(new TextBlock
-            {
-                Text = "Connection Information",
-                FontWeight = FontWeights.Bold
-            });
-
-            // Get local IP address for connection info
-            string localIp = "localhost";
-            try
-            {
-                var host = Dns.GetHostEntry(Dns.GetHostName());
-                foreach (var ip in host.AddressList)
-                {
-                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                    {
-                        localIp = ip.ToString();
-                        break;
-                    }
-                }
+                default:
+                    return 1.0; // Default to medium
             }
-            catch { /* Use localhost if there's an error */ }
-
-            var connectionUrlText = new TextBox
-            {
-                Text = $"ws://{localIp}:{webSocketPort}",
-                IsReadOnly = true,
-                Margin = new Thickness(0, 5, 0, 5)
-            };
-            connectionInfoPanel.Children.Add(connectionUrlText);
-
-            var copyUrlButton = new Button
-            {
-                Content = "Copy Connection URL",
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(10, 5, 10, 5)
-            };
-            copyUrlButton.Click += (s, e) =>
-            {
-                try
-                {
-                    Clipboard.SetText(connectionUrlText.Text);
-                    StatusText = "Connection URL copied to clipboard";
-                }
-                catch (Exception ex)
-                {
-                    StatusText = $"Failed to copy: {ex.Message}";
-                }
-            };
-            connectionInfoPanel.Children.Add(copyUrlButton);
-            panel.Children.Add(connectionInfoPanel);
-
-            // Close button
-            var closeButton = new Button
-            {
-                Content = "Close",
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Padding = new Thickness(15, 5, 15, 5),
-                Margin = new Thickness(0, 20, 0, 0)
-            };
-            closeButton.Click += (s, e) => window.Close();
-            panel.Children.Add(closeButton);
-
-            // Set content and show window
-            var scrollViewer = new ScrollViewer
-            {
-                Content = panel,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-            };
-            window.Content = scrollViewer;
-            window.ShowDialog();
         }
 
-        // Add a button to the main UI to open the Foundry integration setup
-        private void AddFoundryIntegrationButton()
+        /// <summary>
+        /// Serve a status page for HTTP requests
+        /// </summary>
+        private void ServeStatusPage(HttpListenerContext context)
         {
-            // Find the parent panel in the UI
-            var panel = this.FindName("TokenTrackingPanel") as StackPanel;
-            if (panel == null)
-                return;
-
-            // Create the button
-            var integrationButton = new Button
+            try
             {
-                Content = "Foundry VTT Setup",
-                Padding = new Thickness(5, 2, 5, 2),
-                Margin = new Thickness(10, 0, 0, 0)
-            };
+                string responseHtml = $@"
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>TableDetector Status</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f0f0; }}
+                        .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                        h1 {{ color: #333; }}
+                        .status {{ padding: 10px; margin: 10px 0; border-radius: 3px; }}
+                        .status.ok {{ background: #d4edda; color: #155724; }}
+                        .status.warning {{ background: #fff3cd; color: #856404; }}
+                        .status.error {{ background: #f8d7da; color: #721c24; }}
+                        table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                        th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+                        th {{ background-color: #f2f2f2; }}
+                    </style>
+                </head>
+                <body>
+                    <div class='container'>
+                        <h1>TableDetector Status</h1>
+                        <div class='status {(isWebSocketServerRunning ? "ok" : "error")}'>
+                            WebSocket Server: {(isWebSocketServerRunning ? "Running" : "Stopped")}
+                        </div>
+                        <div class='status {(hasValidROI && hasValidTableDepth ? "ok" : "warning")}'>
+                            System Status: {(hasValidROI && hasValidTableDepth ? "Ready" : "Not Ready")}
+                            {(!hasValidROI ? " - No valid ROI defined" : "")}
+                            {(!hasValidTableDepth ? " - No valid table depth detected" : "")}
+                        </div>
+                        
+                        <h2>Connection Information</h2>
+                        <p>WebSocket URL: <code>ws://{context.Request.LocalEndPoint}/</code></p>
+                        <p>Connected Clients: {activeConnections.Count}</p>
+                        
+                        <h2>System Information</h2>
+                        <table>
+                            <tr><th>Table Depth</th><td>{tableDepth} mm</td></tr>
+                            <tr><th>ROI</th><td>{(hasValidROI ? $"{detectedTableROI.Width}x{detectedTableROI.Height}" : "Not defined")}</td></tr>
+                            <tr><th>Detected Tokens</th><td>{detectedTokens.Count}</td></tr>
+                            <tr><th>Camera Mode</th><td>{(isAngledView ? "Angled View" : "Overhead View")}</td></tr>
+                            <tr><th>Updates Sent</th><td>{messageSendCount}</td></tr>
+                        </table>
+                        
+                        <h2>Token Information</h2>
+                        <table>
+                            <tr>
+                                <th>ID</th>
+                                <th>Type</th>
+                                <th>Height</th>
+                                <th>Diameter</th>
+                            </tr>
+                            {string.Join("", detectedTokens.Take(10).Select(t => $@"
+                                <tr>
+                                    <td>{t.Id.ToString().Substring(0, 8)}...</td>
+                                    <td>{t.Type}</td>
+                                    <td>{t.HeightMm} mm</td>
+                                    <td>{(t.DiameterMeters * 1000):F1} mm</td>
+                                </tr>
+                            "))}
+                            {(detectedTokens.Count > 10 ? $"<tr><td colspan='4'>...and {detectedTokens.Count - 10} more</td></tr>" : "")}
+                        </table>
+                        
+                        <p><small>Last updated: {DateTime.Now}</small></p>
+                    </div>
+                </body>
+                </html>";
 
-            // Add click handler
-            integrationButton.Click += (s, e) => AddFoundryVTTIntegrationUI();
+                byte[] buffer = Encoding.UTF8.GetBytes(responseHtml);
+                context.Response.ContentType = "text/html";
+                context.Response.ContentLength64 = buffer.Length;
+                context.Response.StatusCode = 200;
+                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            }
+            catch (Exception ex)
+            {
+                string errorHtml = $"<html><body><h1>Error</h1><p>{ex.Message}</p></body></html>";
+                byte[] buffer = Encoding.UTF8.GetBytes(errorHtml);
+                context.Response.ContentType = "text/html";
+                context.Response.ContentLength64 = buffer.Length;
+                context.Response.StatusCode = 500;
+                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            }
+            finally
+            {
+                context.Response.Close();
+            }
+        }
 
-            // Add to panel
-            panel.Children.Add(integrationButton);
+        /// <summary>
+        /// Add WebSocket server controls to UI
+        /// </summary>
+        private void AddWebSocketServerControls()
+        {
+            this.Dispatcher.Invoke(() => {
+                var panel = FindName("AdvancedFeaturesPanel") as StackPanel;
+                if (panel != null)
+                {
+                    var wsButton = new Button
+                    {
+                        Content = isWebSocketServerRunning ? "Stop WebSocket" : "Start WebSocket",
+                        Padding = new Thickness(5, 2, 5, 2),
+                        Margin = new Thickness(10, 0, 0, 0),
+                        ToolTip = "Start/Stop WebSocket server for Foundry VTT integration"
+                    };
+
+                    wsButton.Click += async (s, e) => {
+                        if (isWebSocketServerRunning)
+                        {
+                            StopWebSocketServer();
+                            wsButton.Content = "Start WebSocket";
+                        }
+                        else
+                        {
+                            await StartWebSocketServer();
+                            wsButton.Content = "Stop WebSocket";
+                        }
+                    };
+
+                    panel.Children.Add(wsButton);
+
+                    // Auto-start if enabled in settings
+                    if (GetWebSocketAutoStartSetting())
+                    {
+                        StartWebSocketServer().ContinueWith(_ => {
+                            this.Dispatcher.Invoke(() => {
+                                wsButton.Content = "Stop WebSocket";
+                            });
+                        });
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// Get WebSocket auto-start setting
+        /// </summary>
+        private bool GetWebSocketAutoStartSetting()
+        {
+            // Default: auto-start disabled
+            return false;
         }
     }
 }

@@ -273,7 +273,16 @@ namespace TableDetector
                         ShowTokenLabels = showTokenLabels,
                         TokenUpdateIntervalMs = tokenUpdateInterval.TotalMilliseconds
                     },
-
+                    // Height Grid settings
+                    HeightGrid = new
+                    {
+                        Enabled = showHeightGrid,
+                        CellSize = gridCellSize,
+                        MinHeight = 0, // Add class field if you implement min/max height ranges
+                        MaxHeight = 100, // Add class field if you implement min/max height ranges
+                        ColorScheme = "GreenRed", // Add class field if you implement color schemes
+                        ShowValues = true // Add class field if you implement this setting
+                    },
                     // Last detected ROI
                     TableROI = new
                     {
@@ -394,6 +403,16 @@ namespace TableDetector
                         }
                     }
 
+                    // Height Grid settings
+                    if (root.TryGetProperty("HeightGrid", out var heightGrid))
+                    {
+                        if (heightGrid.TryGetProperty("Enabled", out var val))
+                            showHeightGrid = val.GetBoolean();
+
+                        if (heightGrid.TryGetProperty("CellSize", out val))
+                            gridCellSize = val.GetInt32();
+                    }
+
                     // Table depth settings
                     if (root.TryGetProperty("TableDepth", out var tableDepthProp))
                         tableDepth = (ushort)tableDepthProp.GetInt32();
@@ -418,7 +437,15 @@ namespace TableDetector
 
                     if (ShowROICheckBox != null)
                         ShowROICheckBox.IsChecked = showROIOverlay;
+                    
+                    if (ShowHeightGridCheckBox != null)
+                        ShowHeightGridCheckBox.IsChecked = showHeightGrid;
 
+                    if (ShowHeightGridMenuItem != null)
+                        ShowHeightGridMenuItem.IsChecked = showHeightGrid;
+
+                    if (GridCellSizeSlider != null)
+                        GridCellSizeSlider.Value = gridCellSize;
                     // Update status displays
                     TableDepthText = $"{tableDepth} mm" + (tableDepthLocked ? " (locked)" : "");
                 });

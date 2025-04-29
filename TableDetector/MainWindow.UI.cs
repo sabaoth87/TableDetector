@@ -253,6 +253,13 @@ namespace TableDetector
 
         #endregion
 
+        private void GridCellSize_ChangedOld(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            gridCellSize = (int)e.NewValue;
+            InitializeHeightGrid(); // Reinitialize with new size
+            StatusText = $"Grid cell size set to {gridCellSize} pixels";
+        }
+
         private void ShowTuningInterface_Click(object sender, RoutedEventArgs e)
         {
             var tuningWindow = new Window
@@ -596,6 +603,19 @@ namespace TableDetector
             ShowDepthContoursMenuItem = this.FindName("ShowDepthContoursMenuItem") as MenuItem;
             TrackTokensMenuItem = this.FindName("TrackTokensMenuItem") as MenuItem;
             ShowTokenLabelsMenuItem = this.FindName("ShowTokenLabelsMenuItem") as MenuItem;
+            // Initialize height grid UI references
+            ShowHeightGridCheckBox = this.FindName("ShowHeightGridCheckBox") as CheckBox;
+            ShowHeightGridMenuItem = this.FindName("ShowHeightGridMenuItem") as MenuItem;
+            GridCellSizeSlider = this.FindName("GridCellSizeSlider") as Slider;
+
+            if (ShowHeightGridCheckBox != null)
+                ShowHeightGridCheckBox.IsChecked = showHeightGrid;
+
+            if (ShowHeightGridMenuItem != null)
+                ShowHeightGridMenuItem.IsChecked = showHeightGrid;
+
+            if (GridCellSizeSlider != null)
+                GridCellSizeSlider.Value = gridCellSize;
 
             // If TokenTypeComboBox isn't found in XAML, create it programmatically
             if (TokenTypeComboBox == null)
@@ -838,5 +858,254 @@ namespace TableDetector
             dialog.Content = panel;
             dialog.ShowDialog();
         }
+
+        /// <summary>
+        /// Shows the height grid configuration dialog
+        /// </summary>
+        private void ConfigureHeightGrid_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Window
+            {
+                Title = "Height Grid Configuration",
+                Width = 500,
+                Height = 400,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+
+            // Create main layout
+            var mainPanel = new StackPanel { Margin = new Thickness(15) };
+
+            // Title
+            mainPanel.Children.Add(new TextBlock
+            {
+                Text = "Height Grid Configuration",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 0, 15)
+            });
+
+            // Description
+            mainPanel.Children.Add(new TextBlock
+            {
+                Text = "Configure the visualization of height data across the table surface.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 15)
+            });
+
+            // Grid cell size slider
+            var cellSizePanel = new StackPanel { Margin = new Thickness(0, 5, 0, 15) };
+            cellSizePanel.Children.Add(new TextBlock
+            {
+                Text = "Grid Cell Size (pixels):",
+                FontWeight = FontWeights.Bold
+            });
+
+            var cellSizeSlider = new Slider
+            {
+                Minimum = 5,
+                Maximum = 50,
+                Value = gridCellSize,
+                TickFrequency = 5,
+                TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight,
+                IsSnapToTickEnabled = true,
+                Width = 300,
+                Margin = new Thickness(0, 5, 0, 0)
+            };
+
+            var cellSizeValue = new TextBlock
+            {
+                Text = $"Current size: {gridCellSize} pixels",
+                Margin = new Thickness(0, 5, 0, 0)
+            };
+
+            cellSizeSlider.ValueChanged += (s, args) =>
+            {
+                gridCellSize = (int)args.NewValue;
+                cellSizeValue.Text = $"Current size: {gridCellSize} pixels";
+            };
+
+            cellSizePanel.Children.Add(cellSizeSlider);
+            cellSizePanel.Children.Add(cellSizeValue);
+            mainPanel.Children.Add(cellSizePanel);
+
+            // Color scheme
+            var colorSchemePanel = new StackPanel { Margin = new Thickness(0, 5, 0, 15) };
+            colorSchemePanel.Children.Add(new TextBlock
+            {
+                Text = "Color Scheme:",
+                FontWeight = FontWeights.Bold
+            });
+
+            var colorSchemeCombo = new ComboBox
+            {
+                Width = 200,
+                Margin = new Thickness(0, 5, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            colorSchemeCombo.Items.Add("Green-Red (Height)");
+            colorSchemeCombo.Items.Add("Blue-Red (Heat Map)");
+            colorSchemeCombo.Items.Add("Rainbow Spectrum");
+            colorSchemeCombo.Items.Add("Grayscale");
+            colorSchemeCombo.SelectedIndex = 0;
+
+            colorSchemePanel.Children.Add(colorSchemeCombo);
+            mainPanel.Children.Add(colorSchemePanel);
+
+            // Height range
+            var heightRangePanel = new StackPanel { Margin = new Thickness(0, 5, 0, 15) };
+            heightRangePanel.Children.Add(new TextBlock
+            {
+                Text = "Height Range (mm):",
+                FontWeight = FontWeights.Bold
+            });
+
+            var heightRangeGrid = new Grid { Margin = new Thickness(0, 5, 0, 0) };
+            heightRangeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            heightRangeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            heightRangeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            heightRangeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            // Min height
+            heightRangeGrid.Children.Add(new TextBlock
+            {
+                Text = "Min:",
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            var minHeightInput = new TextBox
+            {
+                Text = "0",
+                Width = 50,
+                Margin = new Thickness(5, 0, 20, 0)
+            };
+            Grid.SetColumn(minHeightInput, 1);
+            heightRangeGrid.Children.Add(minHeightInput);
+
+            // Max height
+            heightRangeGrid.Children.Add(new TextBlock
+            {
+                Text = "Max:",
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            Grid.SetColumn(heightRangeGrid.Children[2], 2);
+
+            var maxHeightInput = new TextBox
+            {
+                Text = "100",
+                Width = 50,
+                Margin = new Thickness(5, 0, 0, 0)
+            };
+            Grid.SetColumn(maxHeightInput, 3);
+            heightRangeGrid.Children.Add(maxHeightInput);
+
+            heightRangePanel.Children.Add(heightRangeGrid);
+            mainPanel.Children.Add(heightRangePanel);
+
+            // Show text option
+            var showValuesCheckBox = new CheckBox
+            {
+                Content = "Show height values in cells",
+                IsChecked = true,
+                Margin = new Thickness(0, 5, 0, 15)
+            };
+            mainPanel.Children.Add(showValuesCheckBox);
+
+            // Apply to ROI only
+            var roiOnlyCheckBox = new CheckBox
+            {
+                Content = "Apply to ROI only (uncheck to visualize entire depth field)",
+                IsChecked = true,
+                Margin = new Thickness(0, 5, 0, 15)
+            };
+            mainPanel.Children.Add(roiOnlyCheckBox);
+
+            // Buttons
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 15, 0, 0)
+            };
+
+            var applyButton = new Button
+            {
+                Content = "Apply",
+                Padding = new Thickness(20, 5, 20, 5),
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+
+            applyButton.Click += (s, args) =>
+            {
+                // Apply settings
+                gridCellSize = (int)cellSizeSlider.Value;
+
+                // Parse min/max height if valid
+                if (int.TryParse(minHeightInput.Text, out int minHeight) &&
+                    int.TryParse(maxHeightInput.Text, out int maxHeight))
+                {
+                    // Store min/max height values (would need to add these as class fields)
+                    // minGridHeight = minHeight;
+                    // maxGridHeight = maxHeight;
+                }
+
+                // Apply color scheme based on selection
+                // Apply showValues setting
+
+                // Update the grid with new settings
+                if (hasValidROI && showHeightGrid)
+                {
+                    InitializeHeightGrid();
+                    UpdateHeightGrid();
+                }
+
+                // Update UI
+                GridCellSizeSlider.Value = gridCellSize;
+
+                StatusText = "Height grid settings applied";
+                dialog.Close();
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancel",
+                Padding = new Thickness(20, 5, 20, 5)
+            };
+
+            cancelButton.Click += (s, args) => dialog.Close();
+
+            buttonPanel.Children.Add(applyButton);
+            buttonPanel.Children.Add(cancelButton);
+            mainPanel.Children.Add(buttonPanel);
+
+            // Set content and show dialog
+            dialog.Content = mainPanel;
+            dialog.ShowDialog();
+        }
+
+        /// <summary>
+        /// Update height grid on button click
+        /// </summary>
+        private void UpdateHeightGrid_Click(object sender, RoutedEventArgs e)
+        {
+            if (!hasValidROI || !hasValidTableDepth)
+            {
+                StatusText = "Cannot update height grid: No valid ROI or table depth";
+                return;
+            }
+
+            if (!showHeightGrid)
+            {
+                showHeightGrid = true;
+                ShowHeightGridCheckBox.IsChecked = true;
+                ShowHeightGridMenuItem.IsChecked = true;
+            }
+
+            InitializeHeightGrid();
+            UpdateHeightGrid();
+            StatusText = "Height grid updated";
+        }
+
     }
 }

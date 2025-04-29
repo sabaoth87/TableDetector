@@ -35,6 +35,7 @@
                 <Separator/>
                 <MenuItem x:Name="TrackTokensMenuItem" Header="Track Tokens" IsCheckable="True" IsChecked="True" Click="TrackTokens_MenuClick"/>
                 <MenuItem x:Name="ShowTokenLabelsMenuItem" Header="Show Token Labels" IsCheckable="True" IsChecked="True" Click="ShowTokenLabels_MenuClick"/>
+                <MenuItem x:Name="ShowHeightGridMenuItem" Header="Show Height Grid" IsCheckable="True" Click="ToggleHeightGrid_Click"/>
             </MenuItem>
             <MenuItem Header="Tools">
                 <MenuItem Header="Find Largest Surface" Click="FindLargestSurface_Click"/>
@@ -46,6 +47,7 @@
                 <MenuItem Header="Grid Mapping Configuration" Click="ShowGridMappingWindow_Click"/>
                 <Separator/>
                 <MenuItem Header="Diagnostic Info..." Click="Diagnose_Click"/>
+                <MenuItem Header="Height Grid Settings" Click="ConfigureHeightGrid_Click"/>
             </MenuItem>
             <MenuItem Header="Help">
                 <MenuItem Header="About..." Click="About_Click"/>
@@ -99,6 +101,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
@@ -146,6 +149,18 @@
                     <CheckBox Content="Grid Mapping" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
                         VerticalAlignment="Center" x:Name="GridMappingCheckBox" Checked="GridMapping_Changed" Unchecked="GridMapping_Changed"/>
                     <Button Content="Configure" Click="ConfigureAdvancedFeatures_Click" Margin="10,0,0,0" Padding="5,2"/>
+                </StackPanel>
+
+                <!-- Height Grid Mapping -->
+                <StackPanel Grid.Row="3" Grid.Column="0" Orientation="Horizontal" Margin="0,10,0,0" Name="HeightGridPanel">
+                    <TextBlock Text="Height Grid:" Foreground="White" VerticalAlignment="Center"/>
+                    <CheckBox Content="Show Grid" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
+                        VerticalAlignment="Center" x:Name="ShowHeightGridCheckBox" Checked="ToggleHeightGrid_Click" Unchecked="ToggleHeightGrid_Click"/>
+                    <Slider x:Name="GridCellSizeSlider" Minimum="5" Maximum="50" Value="20" 
+                        VerticalAlignment="Center" Width="100" Margin="10,0,0,0"
+                        ValueChanged="GridCellSize_Changed"/>           
+                    <TextBlock Text="Cell Size" Foreground="White" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                    <Button Content="Update Grid" Click="UpdateHeightGrid_Click" Margin="10,0,0,0" Padding="5,2"/>
                 </StackPanel>
             </Grid>
         </Border>

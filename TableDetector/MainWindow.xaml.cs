@@ -19,6 +19,9 @@ namespace TableDetector
         // Kinect sensor and readers
         private KinectSensor kinectSensor = null;
         private MultiSourceFrameReader multiFrameReader = null;
+        // Kinect v2 sensor field of view (in degrees)
+        private const double KINECT_VERTICAL_FOV = 60.0;
+        private const double KINECT_HORIZONTAL_FOV = 70.6;
 
         // Image data 
         private WriteableBitmap depthBitmap = null;
@@ -201,7 +204,12 @@ namespace TableDetector
                 this.multiFrameReader.Dispose();
                 this.multiFrameReader = null;
             }
-
+            // Clean up height grid resources
+            if (HeightGridCanvas != null)
+            {
+                HeightGridCanvas.Children.Clear();
+            }
+            // Clear the entire sensor
             if (this.kinectSensor != null)
             {
                 this.kinectSensor.Close();
@@ -416,23 +424,6 @@ namespace TableDetector
                 FoundryActorType = "npc",
                 IsHostile = false
             };
-        }
-
-        /// <summary>
-        /// Toggles color detection for tokens
-        /// </summary>
-        private void ToggleColorDetection()
-        {
-            enableColorDetection = !enableColorDetection;
-
-            if (enableColorDetection && colorToActorMappings.Count == 0)
-            {
-                InitializeColorDetection();
-            }
-
-            StatusText = enableColorDetection ?
-                "Color detection enabled - tokens will be categorized by color" :
-                "Color detection disabled";
         }
 
         /// <summary>
@@ -902,7 +893,7 @@ namespace TableDetector
                     diameterMm = t.DiameterMeters * 1000, // Convert meters to mm
                     // Include properties for visualization in Foundry
                     isHumanoid = t.Type == TokenType.Miniature,
-                    tokenColor = GetTokenHexColor(t.Type),
+                    tokenColor = GetTokenHexColor(t),
                     // Include detected color and actor information
                     detectedColor = enableColorDetection ? t.ActorCategory : "Unknown",
                     actorType = enableColorDetection ? t.ActorType : "unknown",
@@ -922,9 +913,4 @@ namespace TableDetector
     }
 
 }
-
-        //protected void OnPropertyChanged(string name)
-        //{
-        //    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-        //}
     
