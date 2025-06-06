@@ -40,31 +40,6 @@ namespace TableDetector
             public List<CalibrationPoint> CalibrationPoints { get; set; } = new List<CalibrationPoint>();
 
             /// <summary>
-            /// Converts a physical position to a Foundry grid position
-            /// </summary>
-            public Point PhysicalToVirtual(Point physicalPoint)
-            {
-                // Translate to origin
-                double translatedX = physicalPoint.X - PhysicalOrigin.X;
-                double translatedY = physicalPoint.Y - PhysicalOrigin.Y;
-
-                // Apply rotation
-                double radians = PhysicalRotation * Math.PI / 180;
-                double rotatedX = translatedX * Math.Cos(radians) - translatedY * Math.Sin(radians);
-                double rotatedY = translatedX * Math.Sin(radians) + translatedY * Math.Cos(radians);
-
-                // Scale to virtual grid
-                double scaledX = rotatedX * (VirtualGridSize / PhysicalGridSize) * VirtualScale;
-                double scaledY = rotatedY * (VirtualGridSize / PhysicalGridSize) * VirtualScale;
-
-                // Translate to virtual origin
-                return new Point(
-                    VirtualOrigin.X + scaledX,
-                    VirtualOrigin.Y + scaledY
-                );
-            }
-
-            /// <summary>
             /// Converts a Foundry grid position to a physical position
             /// </summary>
             public Point VirtualToPhysical(Point virtualPoint)
@@ -1351,56 +1326,6 @@ namespace TableDetector
             }
         }
 
-        /// <summary>
-        /// Loads grid mapping from settings
-        /// </summary>
-        private void LoadGridMapping()
-        {
-            try
-            {
-                string mappingFilePath = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "TableDetector",
-                    "gridMapping.json");
-
-                if (System.IO.File.Exists(mappingFilePath))
-                {
-                    string json = System.IO.File.ReadAllText(mappingFilePath);
-                    currentGridMapping = JsonSerializer.Deserialize<GridMapping>(json);
-
-                    StatusText = "Grid mapping loaded";
-                }
-            }
-            catch (Exception ex)
-            {
-                StatusText = $"Error loading grid mapping: {ex.Message}";
-            }
         }
-
-        /// <summary>
-        /// Applies grid mapping to transform a detected token's position
-        /// </summary>
-        private void ApplyGridMappingToTokens()
-        {
-            // Only apply if mapping is active
-            if (!isGridMappingActive || detectedTokens.Count == 0)
-                return;
-
-            foreach (var token in detectedTokens)
-            {
-                // Create physical point from real world position
-                Point physPoint = new Point(
-                    token.RealWorldPosition.X * 1000, // Convert meters to mm
-                    token.RealWorldPosition.Y * 1000  // Convert meters to mm
-                );
-
-                // Apply mapping
-                Point mappedPoint = currentGridMapping.PhysicalToVirtual(physPoint);
-
-                // Store the mapped position in token's FoundryPosition property
-                token.FoundryPosition = mappedPoint;
-            }
-        }
-    }
 
 }

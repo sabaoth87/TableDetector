@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Table Surface Detection" Height="700" Width="1200" 
-        Closing="Window_Closing">
+        >
 
     <Grid>
         <Grid.RowDefinitions>
@@ -15,39 +15,20 @@
         <!-- Settings Menu -->
         <Menu Grid.Row="0" Grid.ColumnSpan="2" Background="#444444">
             <MenuItem Header="File">
-                <MenuItem Header="Export Token Data..." Click="ExportTokenData_Click"/>
-                <MenuItem Header="Save Token Map..." Click="SaveTokenMap_Click"/>
                 <Separator/>
                 <MenuItem Header="Exit" Click="Exit_Click"/>
             </MenuItem>
             <MenuItem Header="Settings">
-                <MenuItem Header="Calibrate Tokens..." Click="CalibrateTokens_Click"/>
                 <Separator/>
                 <MenuItem Header="Export Settings..." Click="ExportSettings_Click"/>
                 <MenuItem Header="Import Settings..." Click="ImportSettings_Click"/>
                 <Separator/>
                 <MenuItem Header="Reset to Default Settings" Click="ResetSettings_Click"/>
             </MenuItem>
-            <MenuItem Header="View">
-                <MenuItem x:Name="ShowROIMenuItem" Header="Show ROI" IsCheckable="True" IsChecked="True" Click="ShowROI_MenuClick"/>
-                <MenuItem x:Name="AngledViewMenuItem" Header="Angled View" IsCheckable="True" IsChecked="True" Click="AngledView_MenuClick"/>
-                <MenuItem x:Name="ShowDepthContoursMenuItem" Header="Show Depth Contours" IsCheckable="True" IsChecked="True" Click="ToggleContours_Click"/>
-                <Separator/>
-                <MenuItem x:Name="TrackTokensMenuItem" Header="Track Tokens" IsCheckable="True" IsChecked="True" Click="TrackTokens_MenuClick"/>
-                <MenuItem x:Name="ShowTokenLabelsMenuItem" Header="Show Token Labels" IsCheckable="True" IsChecked="True" Click="ShowTokenLabels_MenuClick"/>
-                <MenuItem x:Name="ShowHeightGridMenuItem" Header="Show Height Grid" IsCheckable="True" Click="ToggleHeightGrid_Click"/>
-            </MenuItem>
             <MenuItem Header="Tools">
-                <MenuItem Header="Find Largest Surface" Click="FindLargestSurface_Click"/>
-                <MenuItem Header="Lock Table Depth" Click="LockTable_Click"/>
-                <MenuItem Header="Unlock Table Depth" Click="UnlockTable_Click"/>
                 <Separator/>
-                <MenuItem Header="Height Profile Debugging" Click="ToggleHeightProfileDebugging_Click" IsCheckable="True" x:Name="HeightProfileMenuItem"/>
-                <MenuItem Header="Color Detection Settings" Click="ShowColorMappingDialog_Click"/>
                 <MenuItem Header="Grid Mapping Configuration" Click="ShowGridMappingWindow_Click"/>
                 <Separator/>
-                <MenuItem Header="Diagnostic Info..." Click="Diagnose_Click"/>
-                <MenuItem Header="Height Grid Settings" Click="ConfigureHeightGrid_Click"/>
             </MenuItem>
             <MenuItem Header="Help">
                 <MenuItem Header="About..." Click="About_Click"/>
@@ -64,35 +45,25 @@
         </Border>
 
         <!-- Main Content -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
+        <Grid >
+            <Canvas x:Name="RoiSelectionCanvas"
+                Background="Transparent"
+                Panel.ZIndex="100"
+                MouseLeftButtonDown="RoiCanvas_MouseLeftButtonDown"
+                MouseMove="RoiCanvas_MouseMove"
+                MouseLeftButtonUp="RoiCanvas_MouseLeftButtonUp" />
+            <!-- Kinect color feed -->
+            <Image x:Name="KinectColorImage" Stretch="UniformToFill" />
 
-            <!-- Color Feed -->
-            <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="5">
-                <Grid>
-                    <Image x:Name="ColorImage" Stretch="Uniform"/>
-                    <TextBlock Text="Color Feed" Foreground="White" Background="#80000000" 
-                               Padding="5" VerticalAlignment="Top" HorizontalAlignment="Left"/>
-                    <Canvas x:Name="TokenOverlayCanvas" Width="{Binding ActualWidth, ElementName=ColorImage}" 
-                           Height="{Binding ActualHeight, ElementName=ColorImage}"/>
-                </Grid>
-            </Border>
+            <!-- Token overlay canvas -->
+            <Canvas x:Name="TokenOverlayCanvas"
+                IsHitTestVisible="False"
+                Background="Transparent"
+                VerticalAlignment="Stretch"
+                HorizontalAlignment="Stretch"
+                Panel.ZIndex="1" />
 
-            <!-- Depth Feed -->
-            <Border Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Margin="5">
-                <Grid>
-                    <Image x:Name="DepthImage" Stretch="Uniform"
-                           MouseDown="Image_MouseDown" 
-                           MouseMove="Image_MouseMove" 
-                           MouseUp="Image_MouseUp"/>    
-                    <TextBlock Text="Depth Feed" Foreground="White" Background="#80000000" 
-                               Padding="5" VerticalAlignment="Top" HorizontalAlignment="Left"/>
-                    <Canvas x:Name="DepthROICanvas" IsHitTestVisible="False"/>
-                </Grid>
-            </Border>
+
         </Grid>
 
         <!-- Controls -->
@@ -110,58 +81,6 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Table Detection Controls -->
-                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock Text="Table Depth:" Foreground="White" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding TableDepthText}" Foreground="#AAFFAA" FontWeight="Bold" 
-                               Margin="5,0,0,0" Width="120" VerticalAlignment="Center"/>
-
-                    <Button Content="Lock Depth" Click="LockTable_Click" Margin="10,0,0,0" Padding="5,2"/>
-                    <Button Content="Unlock (Auto)" Click="UnlockTable_Click" Margin="5,0,0,0" Padding="5,2"/>
-                    <Button Content="Toggle Contours" Click="ToggleContours_Click" Margin="5,0,0,0" Padding="5,2"/>
-                    <Button Content="Find Largest Surface" Click="FindLargestSurface_Click" Margin="5,0,0,0" Padding="5,2"/>
-                    <CheckBox Content="Angled View" IsChecked="True" Foreground="White" Margin="10,0,0,0" 
-                              VerticalAlignment="Center" Name="AngledViewCheckBox" Checked="AngledView_Changed" Unchecked="AngledView_Changed"/>
-                    <CheckBox Content="Show ROI" IsChecked="True" Foreground="White" Margin="10,0,0,0" 
-                              VerticalAlignment="Center" Name="ShowROICheckBox" Checked="ShowROI_Changed" Unchecked="ShowROI_Changed"/>
-                </StackPanel>
-
-                <!-- TTRPG Token Tracking Controls -->
-                <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Margin="0,10,0,0">
-                    <TextBlock Text="Token Tracking:" Foreground="White" VerticalAlignment="Center"/>
-                    <CheckBox Content="Track Tokens" IsChecked="True" Foreground="White" Margin="10,0,0,0" 
-                              VerticalAlignment="Center" x:Name="TrackTokensCheckBox" Checked="TrackTokens_Changed" Unchecked="TrackTokens_Changed"/>
-                    <CheckBox Content="Show Labels" IsChecked="True" Foreground="White" Margin="10,0,0,0" 
-                              VerticalAlignment="Center" x:Name="ShowTokenLabelsCheckBox" Checked="ShowTokenLabels_Changed" Unchecked="ShowTokenLabels_Changed"/>
-                    <Slider Width="100" Minimum="5" Maximum="50" Value="15" Margin="10,0,0,0" VerticalAlignment="Center" 
-                            x:Name="TokenSizeThresholdSlider" ValueChanged="TokenSizeThreshold_Changed"/>
-                    <TextBlock Text="Size Threshold" Foreground="White" Margin="5,0,0,0" VerticalAlignment="Center"/>
-                    <Button Content="Calibrate Tokens" Click="CalibrateTokens_Click" Margin="20,0,0,0" Padding="5,2"/>
-                    <Button Content="Clear Tokens" Click="ClearTokens_Click" Margin="5,0,0,0" Padding="5,2"/>
-                    <Button Content="Save Token Map" Click="SaveTokenMap_Click" Margin="5,0,0,0" Padding="5,2"/>
-                </StackPanel>
-
-                <!-- Color Detection Controls -->
-                <StackPanel Grid.Row="2" Grid.Column="0" Orientation="Horizontal" Margin="0,10,0,0" Name="AdvancedFeaturesPanel">
-                    <TextBlock Text="Advanced Features:" Foreground="White" VerticalAlignment="Center"/>
-                    <CheckBox Content="Color Detection" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
-                        VerticalAlignment="Center" x:Name="ColorDetectionCheckBox" Checked="ColorDetection_Changed" Unchecked="ColorDetection_Changed"/>
-                    <CheckBox Content="Grid Mapping" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
-                        VerticalAlignment="Center" x:Name="GridMappingCheckBox" Checked="GridMapping_Changed" Unchecked="GridMapping_Changed"/>
-                    <Button Content="Configure" Click="ConfigureAdvancedFeatures_Click" Margin="10,0,0,0" Padding="5,2"/>
-                </StackPanel>
-
-                <!-- Height Grid Mapping -->
-                <StackPanel Grid.Row="3" Grid.Column="0" Orientation="Horizontal" Margin="0,10,0,0" Name="HeightGridPanel">
-                    <TextBlock Text="Height Grid:" Foreground="White" VerticalAlignment="Center"/>
-                    <CheckBox Content="Show Grid" IsChecked="False" Foreground="White" Margin="10,0,0,0" 
-                        VerticalAlignment="Center" x:Name="ShowHeightGridCheckBox" Checked="ToggleHeightGrid_Click" Unchecked="ToggleHeightGrid_Click"/>
-                    <Slider x:Name="GridCellSizeSlider" Minimum="5" Maximum="50" Value="20" 
-                        VerticalAlignment="Center" Width="100" Margin="10,0,0,0"
-                        ValueChanged="GridCellSize_Changed"/>           
-                    <TextBlock Text="Cell Size" Foreground="White" Margin="5,0,0,0" VerticalAlignment="Center"/>
-                    <Button Content="Update Grid" Click="UpdateHeightGrid_Click" Margin="10,0,0,0" Padding="5,2"/>
-                </StackPanel>
             </Grid>
         </Border>
     </Grid>

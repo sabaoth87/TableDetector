@@ -17,41 +17,26 @@ namespace TableDetector
             "TableDetector",
             "settings.json");
 
-        /// <summary>
-        /// Initializes application settings - loads existing settings or creates defaults
-        /// </summary>
-        private void InitializeSettings()
+        public object maxMiniatureHeight { get; private set; }
+        public object miniDetectionSensitivity { get; private set; }
+        public object miniatureBaseThreshold { get; private set; }
+        private int gridCellSize = 20; // Size of each grid cell in pixels
+        private bool showHeightGrid = false;
+        // UI Binding properties
+        private string _statusText = "Initializing...";
+        public string StatusText
         {
-            try
+            get { return _statusText; }
+            set
             {
-                // Create settings directory if it doesn't exist
-                string directory = System.IO.Path.GetDirectoryName(settingsFilePath);
-                if (!Directory.Exists(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                // Try to load existing settings
-                LoadSettings();
-
-                // If this is the first run (no settings file), create default settings
-                if (!File.Exists(settingsFilePath))
-                {
-                    // Set default values
-                    MIN_TOKEN_HEIGHT = 10;
-                    MAX_TOKEN_HEIGHT = 50;
-                    tokenDetectionThreshold = 15;
-                    depthThreshold = isAngledView ? ANGLED_DEG_MAX : ANGLED_DEG_MIN;
-                    maxHistorySize = 10;
-
-                    // Save default settings
-                    SaveSettings();
-                }
+                _statusText = value;
+                OnPropertyChanged("StatusText");
             }
-            catch (Exception ex)
-            {
-                StatusText = $"Error initializing settings: {ex.Message}";
-            }
+        }
+
+        private void OnPropertyChanged(string v)
+        {
+            //throw new NotImplementedException();
         }
 
         /// <summary>
@@ -61,10 +46,6 @@ namespace TableDetector
         {
             try
             {
-                // Optional delay/debounce for auto-saving (avoid saving too frequently)
-                // You could implement a timer-based approach here if needed
-
-                // For now, just save directly
                 SaveSettings();
 
                 if (!string.IsNullOrEmpty(settingName))
@@ -198,38 +179,10 @@ namespace TableDetector
                     // Delete current settings file
                     File.Delete(settingsFilePath);
                 }
-
-                // Set default values
-                MIN_TOKEN_HEIGHT = 10;
-                MAX_TOKEN_HEIGHT = 50;
-                tokenDetectionThreshold = 15;
-                depthThreshold = isAngledView ? ANGLED_DEG_MAX : ANGLED_DEG_MIN;
-                maxHistorySize = 10;
-                trackTokens = true;
-                showTokenLabels = true;
-                showDepthContours = true;
-                showROIOverlay = true;
-
+                
                 // Create a new settings file
                 SaveSettings();
 
-                // Update UI
-                this.Dispatcher.Invoke(() => {
-                    if (TrackTokensCheckBox != null)
-                        TrackTokensCheckBox.IsChecked = trackTokens;
-
-                    if (ShowTokenLabelsCheckBox != null)
-                        ShowTokenLabelsCheckBox.IsChecked = showTokenLabels;
-
-                    if (TokenSizeThresholdSlider != null)
-                        TokenSizeThresholdSlider.Value = tokenDetectionThreshold;
-
-                    if (AngledViewCheckBox != null)
-                        AngledViewCheckBox.IsChecked = isAngledView;
-
-                    if (ShowROICheckBox != null)
-                        ShowROICheckBox.IsChecked = showROIOverlay;
-                });
 
                 StatusText = "All settings reset to default values";
             }
@@ -240,73 +193,42 @@ namespace TableDetector
             }
         }
 
-        /// <summary>
-        /// Saves current application settings to a JSON file
-        /// </summary>
         private void SaveSettings()
         {
             try
             {
-                // Create settings object
                 var settings = new
                 {
-                    // Table detection settings
-                    TableDetection = new
-                    {
-                        DepthThreshold = depthThreshold,
-                        IsAngledView = isAngledView,
-                        ShowDepthContours = showDepthContours,
-                        ShowROIOverlay = showROIOverlay,
-                        MaxHistorySize = maxHistorySize
-                    },
-
-                    // Token tracking settings
                     TokenTracking = new
                     {
-                        MinTokenHeight = MIN_TOKEN_HEIGHT,
-                        MaxTokenHeight = MAX_TOKEN_HEIGHT,
                         MaxMiniatureHeight = maxMiniatureHeight,
-                        TokenDetectionThreshold = tokenDetectionThreshold,
                         MiniDetectionSensitivity = miniDetectionSensitivity,
-                        MiniatureBaseThreshold = miniatureBaseThreshold,
-                        TrackTokens = trackTokens,
-                        ShowTokenLabels = showTokenLabels,
-                        TokenUpdateIntervalMs = tokenUpdateInterval.TotalMilliseconds
+                        MiniatureBaseThreshold = miniatureBaseThreshold
                     },
-                    // Height Grid settings
+                    TableROI = new
+                    {
+                        X = roiRect.X,
+                        Y = roiRect.Y,
+                        Width = roiRect.Width,
+                        Height = roiRect.Height,
+                        IsValid = true
+                    },
                     HeightGrid = new
                     {
                         Enabled = showHeightGrid,
                         CellSize = gridCellSize,
-                        MinHeight = 0, // Add class field if you implement min/max height ranges
-                        MaxHeight = 100, // Add class field if you implement min/max height ranges
-                        ColorScheme = "GreenRed", // Add class field if you implement color schemes
-                        ShowValues = true // Add class field if you implement this setting
+                        MinHeight = 0,
+                        MaxHeight = 100,
+                        ColorScheme = "GreenRed",
+                        ShowValues = true
                     },
-                    // Last detected ROI
-                    TableROI = new
-                    {
-                        X = (int)detectedTableROI.X,
-                        Y = (int)detectedTableROI.Y,
-                        Width = (int)detectedTableROI.Width,
-                        Height = (int)detectedTableROI.Height,
-                        IsValid = detectedTableROI.Width > 0 && detectedTableROI.Height > 0
-                    },
-
-                    // Last known table depth
-                    TableDepth = tableDepth,
-                    TableDepthLocked = tableDepthLocked,
-
-                    // Version info for backward compatibility
-                    Version = "1.1",
+                    Version = "1.2",
                     LastSaved = DateTime.Now
                 };
 
-                // Serialize to JSON
                 string json = System.Text.Json.JsonSerializer.Serialize(settings,
                     new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
 
-                // Write to file
                 File.WriteAllText(settingsFilePath, json);
 
                 StatusText = $"Settings saved to {settingsFilePath}";
@@ -316,139 +238,44 @@ namespace TableDetector
                 StatusText = $"Error saving settings: {ex.Message}";
             }
         }
-        
-        /// <summary>
-        /// Loads application settings from a JSON file
-        /// </summary>
+
         private void LoadSettings()
         {
             try
             {
-                // Check if settings file exists
                 if (!File.Exists(settingsFilePath))
                 {
                     StatusText = "No saved settings found. Using defaults.";
                     return;
                 }
 
-                // Read settings file
                 string json = File.ReadAllText(settingsFilePath);
 
-                // Parse JSON
                 using (System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json))
                 {
                     var root = doc.RootElement;
 
-                    // Table detection settings
-                    if (root.TryGetProperty("TableDetection", out var tableDetection))
-                    {
-                        if (tableDetection.TryGetProperty("DepthThreshold", out var val))
-                            depthThreshold = val.GetInt32();
-
-                        if (tableDetection.TryGetProperty("IsAngledView", out val))
-                            isAngledView = val.GetBoolean();
-
-                        if (tableDetection.TryGetProperty("ShowDepthContours", out val))
-                            showDepthContours = val.GetBoolean();
-
-                        if (tableDetection.TryGetProperty("ShowROIOverlay", out val))
-                            showROIOverlay = val.GetBoolean();
-
-                        if (tableDetection.TryGetProperty("MaxHistorySize", out val))
-                            maxHistorySize = val.GetInt32();
-                    }
-
-                    // Token tracking settings
-                    if (root.TryGetProperty("TokenTracking", out var tokenTracking))
-                    {
-                        if (tokenTracking.TryGetProperty("MinTokenHeight", out var val))
-                            MIN_TOKEN_HEIGHT = val.GetInt32();
-
-                        if (tokenTracking.TryGetProperty("MaxTokenHeight", out val))
-                            MAX_TOKEN_HEIGHT = val.GetInt32();
-
-                        if (tokenTracking.TryGetProperty("TokenDetectionThreshold", out val))
-                            tokenDetectionThreshold = val.GetInt32();
-
-                        if (tokenTracking.TryGetProperty("TrackTokens", out val))
-                            trackTokens = val.GetBoolean();
-
-                        if (tokenTracking.TryGetProperty("ShowTokenLabels", out val))
-                            showTokenLabels = val.GetBoolean();
-
-                        if (tokenTracking.TryGetProperty("TokenUpdateIntervalMs", out val))
-                            tokenUpdateInterval = TimeSpan.FromMilliseconds(val.GetDouble());
-                    }
-
-                    // ROI settings
                     if (root.TryGetProperty("TableROI", out var tableROI))
                     {
                         if (tableROI.TryGetProperty("IsValid", out var isValid) && isValid.GetBoolean())
                         {
                             int x = 0, y = 0, width = 0, height = 0;
 
-                            if (tableROI.TryGetProperty("X", out var val))
-                                x = val.GetInt32();
+                            if (tableROI.TryGetProperty("X", out var val)) x = val.GetInt32();
+                            if (tableROI.TryGetProperty("Y", out val)) y = val.GetInt32();
+                            if (tableROI.TryGetProperty("Width", out val)) width = val.GetInt32();
+                            if (tableROI.TryGetProperty("Height", out val)) height = val.GetInt32();
 
-                            if (tableROI.TryGetProperty("Y", out val))
-                                y = val.GetInt32();
-
-                            if (tableROI.TryGetProperty("Width", out val))
-                                width = val.GetInt32();
-
-                            if (tableROI.TryGetProperty("Height", out val))
-                                height = val.GetInt32();
-
-                            detectedTableROI = new Rect(x, y, width, height);
+                            roiRect = new Int32Rect(x, y, width, height);
                         }
                     }
 
-                    // Height Grid settings
                     if (root.TryGetProperty("HeightGrid", out var heightGrid))
                     {
-                        if (heightGrid.TryGetProperty("Enabled", out var val))
-                            showHeightGrid = val.GetBoolean();
-
-                        if (heightGrid.TryGetProperty("CellSize", out val))
-                            gridCellSize = val.GetInt32();
+                        if (heightGrid.TryGetProperty("Enabled", out var val)) showHeightGrid = val.GetBoolean();
+                        if (heightGrid.TryGetProperty("CellSize", out val)) gridCellSize = val.GetInt32();
                     }
-
-                    // Table depth settings
-                    if (root.TryGetProperty("TableDepth", out var tableDepthProp))
-                        tableDepth = (ushort)tableDepthProp.GetInt32();
-
-                    if (root.TryGetProperty("TableDepthLocked", out var tableDepthLockedProp))
-                        tableDepthLocked = tableDepthLockedProp.GetBoolean();
                 }
-
-                // Update UI controls with loaded settings
-                this.Dispatcher.Invoke(() => {
-                    if (TrackTokensCheckBox != null)
-                        TrackTokensCheckBox.IsChecked = trackTokens;
-
-                    if (ShowTokenLabelsCheckBox != null)
-                        ShowTokenLabelsCheckBox.IsChecked = showTokenLabels;
-
-                    if (TokenSizeThresholdSlider != null)
-                        TokenSizeThresholdSlider.Value = tokenDetectionThreshold;
-
-                    if (AngledViewCheckBox != null)
-                        AngledViewCheckBox.IsChecked = isAngledView;
-
-                    if (ShowROICheckBox != null)
-                        ShowROICheckBox.IsChecked = showROIOverlay;
-                    
-                    if (ShowHeightGridCheckBox != null)
-                        ShowHeightGridCheckBox.IsChecked = showHeightGrid;
-
-                    if (ShowHeightGridMenuItem != null)
-                        ShowHeightGridMenuItem.IsChecked = showHeightGrid;
-
-                    if (GridCellSizeSlider != null)
-                        GridCellSizeSlider.Value = gridCellSize;
-                    // Update status displays
-                    TableDepthText = $"{tableDepth} mm" + (tableDepthLocked ? " (locked)" : "");
-                });
 
                 StatusText = "Settings loaded successfully";
             }
@@ -457,6 +284,5 @@ namespace TableDetector
                 StatusText = $"Error loading settings: {ex.Message}";
             }
         }
-
     }
 }

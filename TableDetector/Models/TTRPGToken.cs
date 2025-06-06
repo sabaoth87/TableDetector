@@ -10,6 +10,8 @@ namespace TableDetector
     /// </summary>
     public class TTRPGToken
     {
+        public double Confidence { get; set; } = 1.0;
+        public int StabilityFrames { get; set; } = 1;
         /// <summary>
         /// Position of the token in the depth image (pixels)
         /// </summary>

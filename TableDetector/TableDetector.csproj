@@ -94,15 +94,21 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Compile Include="MainWindow.Debug.cs" />
-    <Compile Include="MainWindow.DepthProcessing.cs" />
     <Compile Include="MainWindow.GridMapping.cs" />
     <Compile Include="MainWindow.Settings.cs" />
-    <Compile Include="MainWindow.TokenDetection.cs" />
-    <Compile Include="MainWindow.Tokens.cs" />
     <Compile Include="MainWindow.UI.cs" />
-    <Compile Include="MainWindow.WebSocket.cs" />
-    <Compile Include="TTRPGToken.cs" />
+    <Compile Include="Models\MiniatureCandidate.cs" />
+    <Compile Include="Models\TokenColorCategory.cs" />
+    <Compile Include="Services\KinectManager.cs" />
+    <Compile Include="Services\TableSurfaceDetector.cs" />
+    <Compile Include="Services\TokenDetectionService.cs" />
+    <Compile Include="Services\TokenTrackingService.cs" />
+    <Compile Include="Services\WebSocketService.cs" />
+    <Compile Include="Models\TTRPGToken.cs" />
+    <Compile Include="Utilities\DrawingHelpers.cs" />
+    <Compile Include="Services\TableSurfaceEstimator.cs" />
+    <Compile Include="Utilities\TokenColorClassifier.cs" />
+    <Compile Include="Utilities\TokenRenderer.cs" />
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -134,7 +140,6 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
-    <Compile Include="MainWindow.TokenTracking.cs" />
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
@@ -144,5 +149,6 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
